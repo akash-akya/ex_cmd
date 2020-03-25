@@ -2,7 +2,9 @@ defmodule ExCmd.Server do
   require Logger
   use GenServer
 
-  def start_link(cmd, args, opts \\ %{}) do
+  defstruct [:port_server, :input_fifo, :output_fifo]
+
+  def start_server(cmd, args, opts \\ %{}) do
     odu_path = :os.find_executable('odu')
 
     if !odu_path do
@@ -15,72 +17,59 @@ defmodule ExCmd.Server do
       raise "'#{cmd}' executable not found"
     end
 
-    GenServer.start_link(__MODULE__, %{
-      odu_path: odu_path,
-      cmd_path: cmd_path,
-      args: args,
-      opts: opts
-    })
+    {:ok, input_fifo} = GenServer.start_link(ExCmd.Fifo, nil)
+    {:ok, output_fifo} = GenServer.start_link(ExCmd.Fifo, nil)
+
+    {:ok, server} =
+      GenServer.start_link(__MODULE__, %{
+        odu_path: odu_path,
+        cmd_path: cmd_path,
+        args: args,
+        opts: opts,
+        input_fifo: input_fifo,
+        output_fifo: output_fifo
+      })
+
+    %__MODULE__{port_server: server, input_fifo: input_fifo, output_fifo: output_fifo}
   end
 
-  def pull(server, bytes) do
-    GenServer.call(server, {:demand, bytes})
+  def read(server) do
+    ExCmd.Fifo.read(server.output_fifo)
+  end
+
+  def write(server, data) do
+    ExCmd.Fifo.write(server.input_fifo, data)
+  end
+
+  def close_input(server) do
+    ExCmd.Fifo.close(server.input_fifo)
   end
 
   def stop(server) do
-    GenServer.call(server, :stop)
-    GenServer.stop(server)
+    # FIXME: we should only stop port_server, IO GenServers should stop automatically
+    GenServer.stop(server.input_fifo, :normal)
+    GenServer.stop(server.output_fifo, :normal)
+    GenServer.stop(server.port_server, :normal)
   end
 
+  # TODO: link input and output GenServers
   def init(params) do
-    {:ok, %{state: :init}, {:continue, params}}
-  end
+    Temp.track!()
+    dir = Temp.mkdir!()
+    input_fifo_path = Temp.path!(%{basedir: dir})
+    create_fifo(input_fifo_path)
 
-  def handle_continue(params, state) do
-    odu_config_params =
-      if params.opts[:log] do
-        ["-log", "|2"]
-      else
-        []
-      end
+    output_fifo_path = Temp.path!(%{basedir: dir})
+    create_fifo(output_fifo_path)
 
-    args = odu_config_params ++ ["--", to_string(params.cmd_path) | params.args]
-    opts = [:use_stdio, :exit_status, :binary, :hide, {:packet, 2}, args: args]
-    port = Port.open({:spawn_executable, params.odu_path}, opts)
+    port = start_odu_port(params, input_fifo_path, output_fifo_path)
 
-    state = Map.merge(state, %{port: port, state: :ready, waiting_proc: nil, demand: 0, data: []})
+    # TODO: create proper supervision tree and delete fifo files
+    # *after* all GenServers exit
+    :ok = ExCmd.Fifo.open(params.input_fifo, input_fifo_path, :write)
+    :ok = ExCmd.Fifo.open(params.output_fifo, output_fifo_path, :read)
 
-    {:noreply, state}
-  end
-
-  def handle_cast(_, _from, _state), do: {:error, :not_supported}
-
-  def handle_call(:stop, from, %{state: {:done, _}} = state) do
-    reply(from, :ok)
-    {:noreply, state}
-  end
-
-  def handle_call(:stop, from, state) do
-    # exit signal
-    demand_output(state.port, 0)
-    reply(from, :ok)
-    {:noreply, %{state | state: {:done, :stop}, data: []}}
-  end
-
-  def handle_call({:demand, _demand}, from, %{state: {:done, status}} = state) do
-    reply(from, [], status)
-    {:noreply, state}
-  end
-
-  def handle_call({:demand, _demand}, from, %{state: :waiting} = state) do
-    Logger.warn("Has pending request")
-    GenServer.reply(from, {:error, :pending})
-    {:noreply, state}
-  end
-
-  def handle_call({:demand, demand}, from, %{state: :ready} = state) do
-    demand_output(state.port, demand)
-    {:noreply, %{state | state: :waiting, waiting_proc: from, demand: demand, data: []}}
+    {:ok, %{state: :started, port: port}}
   end
 
   def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
@@ -90,45 +79,37 @@ defmodule ExCmd.Server do
       Logger.info("Abnormal command exit status: #{status}")
     end
 
-    reply(state.waiting_proc, state.data, status)
-    {:noreply, %{state | state: {:done, status}, data: []}}
+    {:noreply, %{state | state: {:done, status}}}
   end
 
-  def handle_info({port, {:data, <<0>> <> msg}}, %{port: port} = state) do
-    data_size = IO.iodata_length(msg)
-    IO.inspect("Got output of size: #{data_size}")
+  defp start_odu_port(params, input_fifo_path, output_fifo_path) do
+    args =
+      build_odu_params(params.opts, input_fifo_path, output_fifo_path) ++
+        ["--", to_string(params.cmd_path) | params.args]
 
-    data = [state.data, msg]
-    total = IO.iodata_length(data)
+    options = [:use_stdio, :exit_status, :binary, :hide, {:packet, 2}, args: args]
+    Port.open({:spawn_executable, params.odu_path}, options)
+  end
 
-    state =
-      cond do
-        total == state.demand ->
-          reply(state.waiting_proc, data)
-          %{state | state: :ready, waiting_proc: nil}
-
-        total > state.demand ->
-          raise "Command send more than requested"
-
-        true ->
-          %{state | data: data}
+  defp build_odu_params(opts, input_fifo_path, output_fifo_path) do
+    odu_config_params =
+      if opts[:log] do
+        ["-log", "|2"]
+      else
+        []
       end
 
-    {:noreply, state}
+    odu_config_params ++ ["-input", input_fifo_path, "-output", output_fifo_path]
   end
 
-  defp reply(pid, data, status) do
-    GenServer.reply(pid, {:done, data, status})
-    :ok
-  end
+  defp create_fifo(path) do
+    mkfifo = :os.find_executable('mkfifo')
 
-  defp reply(pid, data) do
-    GenServer.reply(pid, {:cont, data})
-    :ok
-  end
+    if !mkfifo do
+      raise "Can not create named fifo, mkfifo command not found"
+    end
 
-  defp demand_output(port, demand) do
-    data = [<<demand::32-integer-big-unsigned>>]
-    true = Port.command(port, data)
+    {"", 0} = System.cmd("mkfifo", [path])
+    path
   end
 end

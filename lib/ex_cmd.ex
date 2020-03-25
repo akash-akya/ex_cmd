@@ -1,37 +1,33 @@
 defmodule ExCmd do
   alias ExCmd.Server
+  require Logger
 
-  @default_opts %{
-    chunk_size: 65535,
-    log: true
-  }
+  @default_opts %{log: true}
 
-  def stream(cmd, args, opts \\ %{}) do
+  def stream(stream, cmd, args, opts \\ %{}) do
     opts = Map.merge(opts, @default_opts)
 
-    Stream.resource(
+    stream
+    |> Stream.transform(
       fn ->
-        server_opts = Map.drop(opts, [:chunk_size])
-        {:ok, server} = Server.start_link(cmd, args, server_opts)
-        server
+        Server.start_server(cmd, args, opts)
       end,
-      fn server ->
-        Server.pull(server, opts[:chunk_size])
-        |> case do
-          {:done, [], 0} ->
+      fn data, server ->
+        with :ok <- Server.write(server, data),
+             {:ok, data} <- Server.read(server) do
+          {[data], server}
+        else
+          :eof ->
             {:halt, server}
 
-          {:done, data, 0} ->
-            {data, server}
-
-          {:done, _, status} ->
-            raise "Abnormal command exit. status: #{status}"
-
-          {:cont, data} ->
-            {data, server}
+          error ->
+            Logger.warn(error)
+            raise error
         end
       end,
       fn server ->
+        # always close stdin before stoping
+        Server.close_input(server)
         Server.stop(server)
       end
     )
