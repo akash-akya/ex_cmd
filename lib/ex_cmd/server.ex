@@ -1,10 +1,11 @@
 defmodule ExCmd.Server do
   require Logger
+  alias ExCmd.FIFO
   use GenServer
 
   defstruct [:port_server, :input_fifo, :output_fifo]
 
-  def start_server(cmd, args, opts \\ %{}) do
+  def start_link(cmd, args, opts \\ %{}) do
     odu_path = :os.find_executable('odu')
 
     if !odu_path do
@@ -17,43 +18,27 @@ defmodule ExCmd.Server do
       raise "'#{cmd}' executable not found"
     end
 
-    {:ok, input_fifo} = GenServer.start_link(ExCmd.Fifo, nil)
-    {:ok, output_fifo} = GenServer.start_link(ExCmd.Fifo, nil)
-
-    {:ok, server} =
-      GenServer.start_link(__MODULE__, %{
-        odu_path: odu_path,
-        cmd_path: cmd_path,
-        args: args,
-        opts: opts,
-        input_fifo: input_fifo,
-        output_fifo: output_fifo
-      })
-
-    %__MODULE__{port_server: server, input_fifo: input_fifo, output_fifo: output_fifo}
+    GenServer.start_link(__MODULE__, %{
+      odu_path: odu_path,
+      cmd_path: cmd_path,
+      args: args,
+      opts: opts
+    })
   end
 
-  def read(server) do
-    ExCmd.Fifo.read(server.output_fifo)
-  end
+  def read(server), do: GenServer.call(server, :read)
 
-  def write(server, data) do
-    ExCmd.Fifo.write(server.input_fifo, data)
-  end
+  def write(server, data), do: GenServer.call(server, {:write, data})
 
-  def close_input(server) do
-    ExCmd.Fifo.close(server.input_fifo)
-  end
+  def close_input(server), do: GenServer.call(server, :close_input)
 
-  def stop(server) do
-    # FIXME: we should only stop port_server, IO GenServers should stop automatically
-    GenServer.stop(server.input_fifo, :normal)
-    GenServer.stop(server.output_fifo, :normal)
-    GenServer.stop(server.port_server, :normal)
-  end
+  def stop(server), do: GenServer.stop(server, :normal)
 
-  # TODO: link input and output GenServers
   def init(params) do
+    {:ok, nil, {:continue, params}}
+  end
+
+  def handle_continue(params, _) do
     Temp.track!()
     dir = Temp.mkdir!()
     input_fifo_path = Temp.path!(%{basedir: dir})
@@ -64,12 +49,29 @@ defmodule ExCmd.Server do
 
     port = start_odu_port(params, input_fifo_path, output_fifo_path)
 
-    # TODO: create proper supervision tree and delete fifo files
-    # *after* all GenServers exit
-    :ok = ExCmd.Fifo.open(params.input_fifo, input_fifo_path, :write)
-    :ok = ExCmd.Fifo.open(params.output_fifo, output_fifo_path, :read)
+    {:ok, input_fifo} = GenServer.start_link(FIFO, %{path: input_fifo_path, mode: :write})
+    {:ok, output_fifo} = GenServer.start_link(FIFO, %{path: output_fifo_path, mode: :read})
 
-    {:ok, %{state: :started, port: port}}
+    {:noreply, %{state: :started, port: port, input: input_fifo, output: output_fifo}}
+  end
+
+  def handle_call({:write, _}, _, %{state: {:done, status}} = state) do
+    {:reply, {:command_exit, status}, state}
+  end
+
+  def handle_call({:write, data}, from, state) do
+    FIFO.write(state.input, data, from)
+    {:noreply, state}
+  end
+
+  def handle_call(:read, from, state) do
+    FIFO.read(state.output, from)
+    {:noreply, state}
+  end
+
+  def handle_call(:close_input, from, state) do
+    FIFO.close(state.input, from)
+    {:noreply, state}
   end
 
   def handle_info({port, {:exit_status, status}}, %{port: port} = state) do

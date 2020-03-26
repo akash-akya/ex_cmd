@@ -10,7 +10,8 @@ defmodule ExCmd do
     stream
     |> Stream.transform(
       fn ->
-        Server.start_server(cmd, args, opts)
+        {:ok, server} = Server.start_link(cmd, args, opts)
+        server
       end,
       fn data, server ->
         with :ok <- Server.write(server, data),
