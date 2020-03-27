@@ -1,25 +1,27 @@
 defmodule ExCmd do
-  alias ExCmd.Server
+  alias ExCmd.ProcServer
   require Logger
 
-  @default_opts %{log: true}
-
-  def stream(stream, cmd, args, opts \\ %{}) do
+  @default_opts %{log: false}
+  def stream(stream, cmd, args \\ [], opts \\ %{}) do
     opts = Map.merge(opts, @default_opts)
 
     stream
     |> Stream.transform(
       fn ->
-        {:ok, server} = Server.start_link(cmd, args, opts)
+        {:ok, server} = ProcServer.start_link(cmd, args, opts)
         server
       end,
       fn data, server ->
-        with :ok <- Server.write(server, data),
-             {:ok, data} <- Server.read(server) do
+        with :ok <- ProcServer.write(server, data),
+             {:ok, data} <- ProcServer.read(server) do
           {[data], server}
         else
           :eof ->
-            {:halt, server}
+            case ProcServer.status(server) do
+              {:done, 0} -> {:halt, server}
+              {:done, status} -> raise "command exited with status: #{status}"
+            end
 
           error ->
             Logger.warn(error)
@@ -27,9 +29,9 @@ defmodule ExCmd do
         end
       end,
       fn server ->
-        # always close stdin before stoping
-        Server.close_input(server)
-        Server.stop(server)
+        # always close stdin before stoping to give the command chance to exit properly
+        ProcServer.close_input(server)
+        ProcServer.stop(server)
       end
     )
   end

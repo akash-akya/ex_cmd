@@ -1,4 +1,4 @@
-defmodule ExCmd.Server do
+defmodule ExCmd.ProcServer do
   require Logger
   alias ExCmd.FIFO
   use GenServer
@@ -34,6 +34,10 @@ defmodule ExCmd.Server do
 
   def stop(server), do: GenServer.stop(server, :normal)
 
+  def status(server), do: GenServer.call(server, :status)
+
+  def port_info(server), do: GenServer.call(server, :port_info)
+
   def init(params) do
     {:ok, nil, {:continue, params}}
   end
@@ -42,10 +46,10 @@ defmodule ExCmd.Server do
     Temp.track!()
     dir = Temp.mkdir!()
     input_fifo_path = Temp.path!(%{basedir: dir})
-    create_fifo(input_fifo_path)
+    FIFO.create(input_fifo_path)
 
     output_fifo_path = Temp.path!(%{basedir: dir})
-    create_fifo(output_fifo_path)
+    FIFO.create(output_fifo_path)
 
     port = start_odu_port(params, input_fifo_path, output_fifo_path)
 
@@ -53,6 +57,14 @@ defmodule ExCmd.Server do
     {:ok, output_fifo} = GenServer.start_link(FIFO, %{path: output_fifo_path, mode: :read})
 
     {:noreply, %{state: :started, port: port, input: input_fifo, output: output_fifo}}
+  end
+
+  def handle_call(:status, _, %{state: proc_state} = state) do
+    {:reply, proc_state, state}
+  end
+
+  def handle_call(:port_info, _, state) do
+    {:reply, Port.info(state.port), state}
   end
 
   def handle_call({:write, _}, _, %{state: {:done, status}} = state) do
@@ -75,12 +87,7 @@ defmodule ExCmd.Server do
   end
 
   def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
-    if status == 0 do
-      Logger.info("Normal command exit")
-    else
-      Logger.info("Abnormal command exit status: #{status}")
-    end
-
+    Logger.info("command exited with status: #{status}")
     {:noreply, %{state | state: {:done, status}}}
   end
 
@@ -102,16 +109,5 @@ defmodule ExCmd.Server do
       end
 
     odu_config_params ++ ["-input", input_fifo_path, "-output", output_fifo_path]
-  end
-
-  defp create_fifo(path) do
-    mkfifo = :os.find_executable('mkfifo')
-
-    if !mkfifo do
-      raise "Can not create named fifo, mkfifo command not found"
-    end
-
-    {"", 0} = System.cmd("mkfifo", [path])
-    path
   end
 end
