@@ -4,9 +4,15 @@ defmodule ExCmdTest do
   test "stream" do
     str = "hello"
 
-    output =
+    proc_stream = ExCmd.stream!("cat")
+
+    Task.async(fn ->
       Stream.map(1..1000, fn _ -> str end)
-      |> ExCmd.stream("cat")
+      |> Enum.into(proc_stream)
+    end)
+
+    output =
+      proc_stream
       |> Enum.into("")
 
     assert IO.iodata_length(output) == 1000 * String.length(str)

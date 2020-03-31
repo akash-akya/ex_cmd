@@ -70,6 +70,7 @@ defmodule ExCmd.ProcServer do
      }}
   end
 
+  # TODO: re-check state machine and raise proper errors for invalid state transitions
   def handle_call(:run, _, state) do
     port = start_odu_port(state.params, state.input_fifo_path, state.output_fifo_path)
     {:reply, :ok, Map.merge(state, %{port: port, state: :started})}
