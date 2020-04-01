@@ -4,6 +4,9 @@ defmodule ExCmd.ProcServerTest do
 
   test "read" do
     {:ok, s} = ProcServer.start_link("echo", ["test"])
+    :ok = ProcServer.run(s)
+    :ok = ProcServer.open_input(s)
+    :ok = ProcServer.open_output(s)
     assert {:ok, "test\n"} == ProcServer.read(s)
     assert :eof == ProcServer.read(s)
     assert :ok == ProcServer.close_input(s)
@@ -14,6 +17,9 @@ defmodule ExCmd.ProcServerTest do
 
   test "write" do
     {:ok, s} = ProcServer.start_link("cat", [])
+    :ok = ProcServer.run(s)
+    :ok = ProcServer.open_input(s)
+    :ok = ProcServer.open_output(s)
     assert :ok == ProcServer.write(s, "hello")
     assert {:ok, "hello"} == ProcServer.read(s)
     assert :ok == ProcServer.write(s, "world")
@@ -33,6 +39,9 @@ defmodule ExCmd.ProcServerTest do
     # collect events in order and assert that we can still read from
     # stdout even after closing stdin
     {:ok, s} = ProcServer.start_link("base64", [])
+    :ok = ProcServer.run(s)
+    :ok = ProcServer.open_input(s)
+    :ok = ProcServer.open_output(s)
 
     # parallel reader should be blocked till we close stdin
     start_parallel_reader(s, logger)
@@ -60,6 +69,9 @@ defmodule ExCmd.ProcServerTest do
 
   test "external command kill" do
     {:ok, s} = ProcServer.start_link("cat", [])
+    :ok = ProcServer.run(s)
+    :ok = ProcServer.open_input(s)
+    :ok = ProcServer.open_output(s)
     os_pid = ProcServer.port_info(s)[:os_pid]
     assert os_process_alive?(os_pid)
 
@@ -74,6 +86,10 @@ defmodule ExCmd.ProcServerTest do
   test "external command forceful kill" do
     # cat command hangs waiting for EOF
     {:ok, s} = ProcServer.start_link("cat", [])
+    :ok = ProcServer.run(s)
+    :ok = ProcServer.open_input(s)
+    :ok = ProcServer.open_output(s)
+
     os_pid = ProcServer.port_info(s)[:os_pid]
     assert os_process_alive?(os_pid)
 
@@ -88,8 +104,51 @@ defmodule ExCmd.ProcServerTest do
 
   test "exit status" do
     {:ok, s} = ProcServer.start_link("cat", ["some_invalid_file_name"])
+    :ok = ProcServer.run(s)
+    :ok = ProcServer.open_input(s)
+    :ok = ProcServer.open_output(s)
     :timer.sleep(500)
     assert {:done, 1} == ProcServer.status(s)
+  end
+
+  test "abnormal exit of fifo" do
+    Process.flag(:trap_exit, true)
+    {:ok, s} = ProcServer.start_link("cat", [])
+    :ok = ProcServer.run(s)
+    :ok = ProcServer.open_input(s)
+    :ok = ProcServer.open_output(s)
+
+    pid = spawn_link(fn -> ProcServer.write(s, :invalid) end)
+    assert_receive {:EXIT, ^pid, reason} when reason != :normal
+
+    assert Process.alive?(s) == false
+  end
+
+  test "explicite exit of fifo" do
+    {:ok, s} = ProcServer.start_link("cat", [])
+    :ok = ProcServer.run(s)
+    :ok = ProcServer.open_input(s)
+    :ok = ProcServer.open_output(s)
+
+    ProcServer.close_input(s)
+    :timer.sleep(100)
+    assert Process.alive?(s) == true
+  end
+
+  test "process kill with parallel blocking write" do
+    {:ok, s} = ProcServer.start_link("cat", [])
+    :ok = ProcServer.run(s)
+    :ok = ProcServer.open_input(s)
+    :ok = ProcServer.open_output(s)
+
+    large_data = Stream.cycle(["test"]) |> Stream.take(100_000) |> Enum.to_list()
+    pid = Task.async(fn -> ProcServer.write(s, large_data) end)
+
+    :timer.sleep(200)
+    ProcServer.stop(s)
+    :timer.sleep(100)
+
+    assert Task.await(pid) == :closed
   end
 
   def start_parallel_reader(proc_server, logger) do
@@ -107,7 +166,7 @@ defmodule ExCmd.ProcServerTest do
     end
   end
 
-  def start_events_collector() do
+  def start_events_collector do
     {:ok, ordered_events} = Agent.start(fn -> [] end)
     ordered_events
   end

@@ -7,19 +7,25 @@ defmodule ExCmd.FIFO do
     GenServer.start_link(__MODULE__, args)
   end
 
+  def open(server, dst), do: GenServer.cast(server, {:open, dst})
+
   def write(server, data, dst), do: GenServer.cast(server, {:write, data, dst})
 
   def read(server, dst), do: GenServer.cast(server, {:read, dst})
 
-  def close(server, dst), do: GenServer.cast(server, {:close, dst})
-
   def init(args) do
-    fifo = File.open!(args.path, [:binary, :raw, args.mode])
-    {:ok, %{fifo: fifo, mode: args.mode}}
+    {:ok, %{path: args.path, mode: args.mode}}
+  end
+
+  def handle_cast({:open, dst}, state) do
+    fifo = File.open!(state.path, [:binary, :raw, state.mode])
+    GenServer.reply(dst, :ok)
+    {:noreply, Map.put(state, :fifo, fifo)}
   end
 
   def handle_cast({:write, data, dst}, %{mode: :write} = state) do
-    data = [<<byte_size(data)::16>>, data]
+    size = IO.iodata_length(data)
+    data = [<<size::16>>, data]
 
     case :file.write(state.fifo, data) do
       :ok ->
@@ -45,11 +51,6 @@ defmodule ExCmd.FIFO do
         GenServer.reply(dst, error)
     end
 
-    {:noreply, state}
-  end
-
-  def handle_cast({:close, from}, state) do
-    GenServer.reply(from, :file.close(state.fifo))
     {:noreply, state}
   end
 
