@@ -161,7 +161,7 @@ defmodule ExCmd.ProcServer do
   end
 
   def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
-    Logger.info("command exited with status: #{status}")
+    Logger.debug("command exited with status: #{status}")
 
     {waiting_process, state} = Map.pop(state, :waiting_process)
 

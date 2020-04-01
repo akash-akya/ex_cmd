@@ -1,8 +1,28 @@
 # ExCmd
 
-ExCmd is an Elixir library to run and communicate with external programs.
+ExCmd is an Elixir library to run and communicate with external programs with back-pressure.
 
-ExCmd is built around the idea of streaming data through external program. Think streaming video through `ffmpeg` command and receiving the output back. ExCmd tries to solve this along with [odu](https://github.com/akash-akya/odu).
+ExCmd is built around the idea of streaming data through external program. Think streaming a video through `ffmpeg` to server a web request. For example, getting audio out of a stream is as simple as
+``` elixir
+def audio_stream!(stream) do
+  # read from stdin and write to stdout
+  proc_stream = ExCmd.stream!("ffmpeg", ~w(-i - -f mp3 -))
+
+  Task.async(fn ->
+    Stream.into(stream, proc_stream)
+    |> Stream.run()
+  end)
+
+  proc_stream
+end
+
+File.stream!("music_video.mkv", [], 65535)
+|> audio_stream!()
+|> Stream.into(File.stream!("music.mp3"))
+|> Stream.run()
+```
+
+`ExCmd.stream!` is a convenience wrapper around `ExCmd.ProcServer`. If you want more control over stdin, stdout and os process use `ExCmd.ProcServer` directly.
 
 *Note: ExCmd is still work-in-progress. Expect breaking changes*
 
@@ -21,7 +41,9 @@ These are essentially same as "why use port over NIF"
 * **Ergonomics:** ExCmd can be thought as just linking your beam processes and external program with good old pipes
 
 
-## Usage
+ExCmd uses [odu](https://github.com/akash-akya/odu) as a middleware to fill the gaps left ports.
+
+## Installation
 
 1. Install [odu](https://github.com/akash-akya/odu) and make sure its in you path
-2. Use ExCmd
+2. Install ExCmd
