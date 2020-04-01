@@ -30,9 +30,17 @@ defmodule ExCmd.ProcServer do
 
   def open_output(server), do: GenServer.call(server, {:open_fifo, :output})
 
-  def read(server), do: GenServer.call(server, :read)
+  def read(server) do
+    GenServer.call(server, :read)
+  catch
+    :exit, {:normal, _} -> :closed
+  end
 
-  def write(server, data), do: GenServer.call(server, {:write, data})
+  def write(server, data) do
+    GenServer.call(server, {:write, data})
+  catch
+    :exit, {:normal, _} -> :closed
+  end
 
   def close_input(server), do: GenServer.call(server, :close_input)
 

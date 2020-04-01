@@ -135,6 +135,22 @@ defmodule ExCmd.ProcServerTest do
     assert Process.alive?(s) == true
   end
 
+  test "process kill with parallel blocking write" do
+    {:ok, s} = ProcServer.start_link("cat", [])
+    :ok = ProcServer.run(s)
+    :ok = ProcServer.open_input(s)
+    :ok = ProcServer.open_output(s)
+
+    large_data = Stream.cycle(["test"]) |> Stream.take(100_000) |> Enum.to_list()
+    pid = Task.async(fn -> ProcServer.write(s, large_data) end)
+
+    :timer.sleep(200)
+    ProcServer.stop(s)
+    :timer.sleep(100)
+
+    assert Task.await(pid) == :closed
+  end
+
   def start_parallel_reader(proc_server, logger) do
     spawn_link(fn -> reader_loop(proc_server, logger) end)
   end
