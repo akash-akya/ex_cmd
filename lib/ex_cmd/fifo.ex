@@ -24,7 +24,8 @@ defmodule ExCmd.FIFO do
   end
 
   def handle_cast({:write, data, dst}, %{mode: :write} = state) do
-    data = [<<byte_size(data)::16>>, data]
+    size = IO.iodata_length(data)
+    data = [<<size::16>>, data]
 
     case :file.write(state.fifo, data) do
       :ok ->
