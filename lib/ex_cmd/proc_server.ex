@@ -3,8 +3,6 @@ defmodule ExCmd.ProcServer do
   alias ExCmd.FIFO
   use GenServer
 
-  defstruct [:port_server, :input_fifo, :output_fifo]
-
   def start_link(cmd, args, opts \\ %{}) do
     odu_path = :os.find_executable('odu')
 
@@ -66,6 +64,8 @@ defmodule ExCmd.ProcServer do
        state: :init,
        input_fifo_path: input_fifo_path,
        output_fifo_path: output_fifo_path,
+       input: nil,
+       output: nil,
        params: params
      }}
   end
@@ -76,16 +76,19 @@ defmodule ExCmd.ProcServer do
     {:reply, :ok, Map.merge(state, %{port: port, state: :started})}
   end
 
+  # All blocking FIFO operations such as open, read, write etc, should
+  # be offloaded to specific fifo GenServer. ProcServer must be
+  # non-blocking
   def handle_call({:open_fifo, :input}, from, state) do
     {:ok, input_fifo} = GenServer.start_link(FIFO, %{path: state.input_fifo_path, mode: :write})
     FIFO.open(input_fifo, from)
-    {:noreply, Map.put(state, :input, input_fifo)}
+    {:noreply, %{state | input: input_fifo}}
   end
 
   def handle_call({:open_fifo, :output}, from, state) do
     {:ok, output_fifo} = GenServer.start_link(FIFO, %{path: state.output_fifo_path, mode: :read})
     FIFO.open(output_fifo, from)
-    {:noreply, Map.put(state, :output, output_fifo)}
+    {:noreply, %{state | output: output_fifo}}
   end
 
   def handle_call({:await_exit, _}, _, %{state: {:done, status}} = state) do
@@ -135,13 +138,18 @@ defmodule ExCmd.ProcServer do
   end
 
   def handle_call(:close_input, _, state) do
-    Process.exit(state.input, :kill)
+    # can not use :normal as a process might have pending write which
+    # can exit delay arbirarily
+    Process.exit(state.input, :force_close)
     {:reply, :ok, %{state | input: :closed}}
   end
 
-  # ignore exit signals
-  def handle_info({:EXIT, _, _}, state) do
+  def handle_info({:EXIT, _, reason}, state) when reason in [:normal, :force_close] do
     {:noreply, state}
+  end
+
+  def handle_info({:EXIT, _, reason}, state) do
+    {:stop, reason, state}
   end
 
   def handle_info({port, {:exit_status, status}}, %{port: port} = state) do

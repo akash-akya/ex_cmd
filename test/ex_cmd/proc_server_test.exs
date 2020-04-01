@@ -111,6 +111,30 @@ defmodule ExCmd.ProcServerTest do
     assert {:done, 1} == ProcServer.status(s)
   end
 
+  test "abnormal exit of fifo" do
+    Process.flag(:trap_exit, true)
+    {:ok, s} = ProcServer.start_link("cat", [])
+    :ok = ProcServer.run(s)
+    :ok = ProcServer.open_input(s)
+    :ok = ProcServer.open_output(s)
+
+    pid = spawn_link(fn -> ProcServer.write(s, :invalid) end)
+    assert_receive {:EXIT, ^pid, reason} when reason != :normal
+
+    assert Process.alive?(s) == false
+  end
+
+  test "explicite exit of fifo" do
+    {:ok, s} = ProcServer.start_link("cat", [])
+    :ok = ProcServer.run(s)
+    :ok = ProcServer.open_input(s)
+    :ok = ProcServer.open_output(s)
+
+    ProcServer.close_input(s)
+    :timer.sleep(100)
+    assert Process.alive?(s) == true
+  end
+
   def start_parallel_reader(proc_server, logger) do
     spawn_link(fn -> reader_loop(proc_server, logger) end)
   end
