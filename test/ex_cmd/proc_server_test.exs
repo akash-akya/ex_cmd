@@ -1,5 +1,5 @@
 defmodule ExCmd.ProcServerTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
   alias ExCmd.ProcServer
 
   test "read" do
@@ -103,12 +103,12 @@ defmodule ExCmd.ProcServerTest do
   end
 
   test "exit status" do
-    {:ok, s} = ProcServer.start_link("cat", ["some_invalid_file_name"])
+    {:ok, s} = ProcServer.start_link("odu", ["-invalid"])
     :ok = ProcServer.run(s)
     :ok = ProcServer.open_input(s)
     :ok = ProcServer.open_output(s)
     :timer.sleep(500)
-    assert {:done, 1} == ProcServer.status(s)
+    assert {:done, 2} == ProcServer.status(s)
   end
 
   test "abnormal exit of fifo" do
@@ -149,6 +149,19 @@ defmodule ExCmd.ProcServerTest do
     :timer.sleep(100)
 
     assert Task.await(pid) == :closed
+  end
+
+  test "stderr" do
+    {:ok, s} = ProcServer.start_link("odu", ["-invalid"], %{use_stderr: true})
+    :ok = ProcServer.run(s)
+    :ok = ProcServer.open_input(s)
+    :ok = ProcServer.open_output(s)
+    :ok = ProcServer.open_error(s)
+    :timer.sleep(500)
+
+    assert {:ok, "flag provided but not defined: -invalid\n" <> _} = ProcServer.read_error(s)
+
+    assert {:done, 2} == ProcServer.status(s)
   end
 
   def start_parallel_reader(proc_server, logger) do
