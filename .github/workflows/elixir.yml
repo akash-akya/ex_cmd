@@ -16,20 +16,24 @@ jobs:
         with:
           otp-version: ${{matrix.otp}}
           elixir-version: ${{matrix.elixir}}
+      - name: Install Dependencies
+        run: mix deps.get
+      - name: Compile
+        run: mix compile --force --warnings-as-errors
+      - name: Check format
+        run: mix format --check-formatted
       - name: Download odu
         uses: Legion2/download-release-action@v2.1.0
         with:
           repository: akash-akya/odu
-          tag: 'v0.0.2'
+          tag: 'v0.0.3'
           path: tmp
-          file: odu_v0.0.2_linux_amd64.tar.gz
+          file: odu_v0.0.3_linux_amd64.tar.gz
       - name: Install odu
         run: |
           mkdir -p $GITHUB_WORKSPACE/bin
-          tar xvzf ./tmp/odu_v0.0.2_linux_amd64.tar.gz -C $GITHUB_WORKSPACE/bin
+          tar xvzf ./tmp/odu_v0.0.3_linux_amd64.tar.gz -C $GITHUB_WORKSPACE/bin
           chmod +x $GITHUB_WORKSPACE/bin/odu
           echo "::add-path::$GITHUB_WORKSPACE/bin"
-      - name: Install Dependencies
-        run: mix deps.get
       - name: Run Tests
         run: mix test
