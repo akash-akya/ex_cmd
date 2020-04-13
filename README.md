@@ -34,7 +34,7 @@ File.stream!("music_video.mkv", [], 65535)
 If all you want is to run a command with no communication, then just sticking with `System.cmd` is better option.
 
 ## Overview
-Each `ExCmd.ProcessServer` process maps to an OS process. Internally `ExCmd.ProcessServer` creates and manages separate processes for each of the IO streams (Stdin, Stdout, Stderr) and a port which maps to an OS proccess (an `odu` process). Keeping input, output and the OS process as separate beam proccess helps us to handle them independently (closing stdin, blocking the OS process by not opening stdout pipe). Conceptually this directly maps to handling of process at OS level. Blocking functions such as `read` and `write` only blocks the calling process, not the `ExCmd.Process` itself. A blocking read does not *not* block a parallel write. These blocking calls are the primitives for building back-pressure.
+Each `ExCmd.ProcessServer` process maps to an OS process. Internally `ExCmd.ProcessServer` creates and manages separate processes for each of the IO streams (Stdin, Stdout, Stderr) and a port which maps to an OS proccess (an `odu` process). Keeping input, output and the OS process as separate beam proccess helps us to handle them independently (closing stdin, blocking the OS process by not opening stdout pipe). Conceptually this directly maps to the OS primitives. Blocking functions such as `read` and `write` only blocks the calling process, not the `ExCmd.Process` itself. A blocking read does *not* block a parallel write. These blocking calls are the primitives for building back-pressure.
 
 For most of the use-cases using `ExCmd.stream!` abstraction should be enough. Use `ExCmd.ProcessServer` only if you need more control over the life-cycle of IO streams and OS process.
 

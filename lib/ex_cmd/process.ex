@@ -8,7 +8,7 @@ defmodule ExCmd.Process do
   separate processes for each of the IO streams (Stdin, Stdout,
   Stderr) and a port which maps to an OS proccess of `odu`. Blocking
   functions such as `read` and `write` only blocks the calling
-  process, not the `ExCmd.Process` itself. A blocking read does not
+  process, not the `ExCmd.Process` itself. A blocking read does
   *not* block a parallel write. Blocking calls are the primitives for
   building back-pressure.
 
