@@ -7,21 +7,45 @@ defmodule ExCmd.MixProject do
       version: "0.1.0",
       elixir: "~> 1.7",
       start_permanent: Mix.env() == :prod,
-      deps: deps()
+      deps: deps(),
+
+      # Package
+      package: package(),
+      description: description(),
+
+      # Docs
+      source_url: "https://github.com/akash-akya/ex_cmd",
+      homepage_url: "https://github.com/akash-akya/ex_cmd",
+      docs: [
+        main: "readme",
+        extras: ["README.md"]
+      ]
     ]
   end
 
-  # Run "mix help compile.app" to learn about applications.
   def application do
     [
       extra_applications: [:logger]
     ]
   end
 
+  defp description do
+    "Interact with external programs with back-pressure"
+  end
+
+  defp package do
+    [
+      maintainers: ["Akash Hiremath"],
+      licenses: ["MIT"],
+      links: %{GitHub: "https://github.com/akash-akya/ex_cmd"}
+    ]
+  end
+
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:temp, "~> 0.4"}
+      {:temp, "~> 0.4"},
+      {:ex_doc, ">= 0.0.0", only: :dev}
     ]
   end
 end
