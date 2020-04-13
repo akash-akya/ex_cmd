@@ -1,9 +1,7 @@
-defmodule ExCmd.ProcServer do
+defmodule ExCmd.ProcessServer do
   require Logger
   alias ExCmd.FIFO
   use GenServer
-
-  @default %{use_stderr: false}
 
   def start_link(cmd, args, opts \\ %{}) do
     odu_path = :os.find_executable('odu')
@@ -24,46 +22,10 @@ defmodule ExCmd.ProcServer do
         odu_path: odu_path,
         cmd_path: cmd_path,
         args: args,
-        opts: Map.merge(@default, opts)
+        opts: opts
       }
     )
   end
-
-  def run(server), do: GenServer.call(server, :run)
-
-  def open_input(server), do: GenServer.call(server, {:open_fifo, :input, :write})
-
-  def open_output(server), do: GenServer.call(server, {:open_fifo, :output, :read})
-
-  def open_error(server), do: GenServer.call(server, {:open_fifo, :error, :read})
-
-  def read(server, timeout \\ :infinity) do
-    GenServer.call(server, :read, timeout)
-  catch
-    :exit, {:normal, _} -> :closed
-  end
-
-  def read_error(server, timeout \\ :infinity) do
-    GenServer.call(server, :read_error, timeout)
-  catch
-    :exit, {:normal, _} -> :closed
-  end
-
-  def write(server, data, timeout \\ :infinity) do
-    GenServer.call(server, {:write, data}, timeout)
-  catch
-    :exit, {:normal, _} -> :closed
-  end
-
-  def close_input(server), do: GenServer.call(server, :close_input)
-
-  def stop(server), do: GenServer.stop(server, :normal)
-
-  def status(server), do: GenServer.call(server, :status)
-
-  def await_exit(server, timeout \\ :infinity), do: GenServer.call(server, {:await_exit, timeout})
-
-  def port_info(server), do: GenServer.call(server, :port_info)
 
   def init(params) do
     {:ok, nil, {:continue, params}}
@@ -120,12 +82,16 @@ defmodule ExCmd.ProcServer do
   end
 
   # All blocking FIFO operations such as open, read, write etc, should
-  # be offloaded to specific fifo GenServer. ProcServer must be
+  # be offloaded to specific fifo GenServer. ProcessServer must be
   # non-blocking
   def handle_call({:open_fifo, type, mode}, from, state) do
-    {:ok, fifo} = GenServer.start_link(FIFO, %{path: state.fifo_paths[type], mode: mode})
-    FIFO.open(fifo, from)
-    {:noreply, Map.put(state, type, fifo)}
+    if state[type] do
+      {:reply, {:error, :already_opened}, state}
+    else
+      {:ok, fifo} = GenServer.start_link(FIFO, %{path: state.fifo_paths[type], mode: mode})
+      FIFO.open(fifo, from)
+      {:noreply, Map.put(state, type, fifo)}
+    end
   end
 
   def handle_call({:await_exit, _}, _, %{state: {:done, status}} = state) do
@@ -133,15 +99,22 @@ defmodule ExCmd.ProcServer do
   end
 
   def handle_call({:await_exit, timeout}, from, state) do
-    state =
+    timeout_ref =
       if timeout != :infinity do
-        timeout_ref = Process.send_after(self(), {:await_timeout, from}, timeout)
-        Map.put(state, :timeout_ref, timeout_ref)
+        Process.send_after(self(), {:await_timeout, from}, timeout)
       else
-        state
+        nil
       end
 
-    {:noreply, Map.put(state, :waiting_process, from)}
+    state =
+      Map.update(
+        state,
+        :waiting_processes,
+        %{from => timeout_ref},
+        &Map.put(&1, from, timeout_ref)
+      )
+
+    {:noreply, state}
   end
 
   def handle_call(:status, _, %{state: proc_state} = state) do
@@ -153,11 +126,11 @@ defmodule ExCmd.ProcServer do
   end
 
   def handle_call({:write, _}, _, %{input: :closed} = state) do
-    {:reply, :closed, state}
+    {:reply, {:error, :closed}, state}
   end
 
   def handle_call({:write, _}, _, %{state: {:done, _}} = state) do
-    {:reply, :closed, state}
+    {:reply, {:error, :closed}, state}
   end
 
   def handle_call({:write, data}, from, state) do
@@ -166,24 +139,32 @@ defmodule ExCmd.ProcServer do
   end
 
   def handle_call(:read, from, state) do
-    FIFO.read(state.output, from)
-    {:noreply, state}
+    if state[:output] == :closed do
+      {:reply, {:error, :closed}, state}
+    else
+      FIFO.read(state.output, from)
+      {:noreply, state}
+    end
   end
 
   def handle_call(:read_error, from, state) do
-    FIFO.read(state.error, from)
-    {:noreply, state}
-  end
-
-  def handle_call(:close_input, _, %{input: :closed} = state) do
-    {:reply, :ok, state}
+    if state[:error] == :closed do
+      {:reply, {:error, :closed}, state}
+    else
+      FIFO.read(state.error, from)
+      {:noreply, state}
+    end
   end
 
   def handle_call(:close_input, _, state) do
-    # can not use :normal as a process might have pending write which
-    # can exit delay arbirarily
-    Process.exit(state.input, :force_close)
-    {:reply, :ok, %{state | input: :closed}}
+    if state[:input] == :closed do
+      {:reply, :ok, state}
+    else
+      # can not use :normal as a process might have pending write which
+      # can exit delay arbirarily
+      Process.exit(state.input, :force_close)
+      {:reply, :ok, %{state | input: :closed}}
+    end
   end
 
   def handle_info({:EXIT, _, reason}, state) when reason in [:normal, :force_close] do
@@ -197,16 +178,13 @@ defmodule ExCmd.ProcServer do
   def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
     Logger.debug("command exited with status: #{status}")
 
-    {waiting_process, state} = Map.pop(state, :waiting_process)
+    {waiting_process, state} = Map.pop(state, :waiting_processes)
 
     if waiting_process do
-      GenServer.reply(waiting_process, {:ok, status})
-    end
-
-    {await_timeout, state} = Map.pop(state, :await_timeout)
-
-    if await_timeout do
-      :timer.cancel(await_timeout)
+      for {pid, timeout_ref} <- waiting_process do
+        GenServer.reply(pid, {:ok, status})
+        if timeout_ref, do: :timer.cancel(timeout_ref)
+      end
     end
 
     {:noreply, %{state | state: {:done, status}}}
@@ -214,7 +192,7 @@ defmodule ExCmd.ProcServer do
 
   def handle_info({:await_timeout, pid}, state) do
     GenServer.reply(pid, :timeout)
-    {:noreply, Map.drop(state, [:waiting_process, :timeout_ref])}
+    {:noreply, Map.update!(state, :waiting_processes, &Map.delete(&1, pid))}
   end
 
   defp start_odu_port(params, input_path, output_path, error_path) do
