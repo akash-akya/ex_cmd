@@ -1,5 +1,6 @@
 defmodule ExCmd.FIFO do
-  @doc false
+  @moduledoc false
+
   use GenServer
   require Logger
 

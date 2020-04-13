@@ -1,13 +1,17 @@
 defmodule ExCmd.Stream do
+  @moduledoc """
+   Defines a `ExCmd.Stream` struct returned by `ExCmd.stream!/3`.
+  """
+
   alias ExCmd.Process
+
   defstruct [:proc_server, :stream_opts]
 
-  @default_stream_opts %{exit_timeout: :infinity}
+  @type t :: %__MODULE__{}
 
+  @doc false
   def __build__(cmd, args, opts) do
     {stream_opts, proc_opts} = Map.split(opts, [:exit_timeout])
-    stream_opts = Map.merge(@default_stream_opts, stream_opts)
-
     {:ok, proc} = Process.start_link(cmd, args, proc_opts)
     %ExCmd.Stream{proc_server: proc, stream_opts: stream_opts}
   end
