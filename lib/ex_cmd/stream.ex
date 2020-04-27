@@ -18,7 +18,10 @@ defmodule ExCmd.Stream do
 
   defimpl Collectable do
     def into(%{proc_server: proc} = stream) do
-      :ok = Process.open_input(proc)
+      case Process.open_input(proc) do
+        :ok -> :ok
+        {:error, :unused_stream} -> raise "Can not use Collectable stream with :no_stdin option"
+      end
 
       collector_fun = fn
         :ok, {:cont, x} ->

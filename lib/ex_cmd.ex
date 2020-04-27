@@ -12,6 +12,13 @@ defmodule ExCmd do
   which means it can be used both for reading from stdout and write to
   stdin of an OS process simultaneously (see examples).
 
+  By default, ExCmd assumes that the command uses both stdin and
+  stdout. So both streams (Enumerable and Collectable) *must* be used
+  even if the command does not use it. You can change this behaviour
+  by passing `no_stdin` option for commands which does not read input
+  fron stdin (such as `find` command). see `ExCmd.Process` options for
+  more detils.
+
   ### Options
     * `exit_timeout`     - Duration to wait for external program to terminate after completion before raising an error. Defaults to `:infinity`
   All other options are passed to `ExCmd.Process.start_link/3`
