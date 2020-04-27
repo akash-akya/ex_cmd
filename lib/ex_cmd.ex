@@ -49,7 +49,7 @@ defmodule ExCmd do
   ```
   """
   def stream!(cmd, args \\ [], opts \\ %{}) do
-    opts = Map.merge(opts, @default_opts)
+    opts = Map.merge(@default_opts, opts)
     ExCmd.Stream.__build__(cmd, args, opts)
   end
 end
