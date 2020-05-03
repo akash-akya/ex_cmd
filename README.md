@@ -52,7 +52,7 @@ ExCmd uses [odu](https://github.com/akash-akya/odu) as a middleware to fill the 
 
 ## Installation
 
-1. Install [odu](https://github.com/akash-akya/odu) and make sure its in your path
+1. Install latest [odu](https://github.com/akash-akya/odu) and make sure its in your path
 2. Install ExCmd
 ```elixir
 def deps do
