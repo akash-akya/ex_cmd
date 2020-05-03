@@ -152,7 +152,7 @@ defmodule ExCmd.ProcessTest do
   end
 
   test "stderr" do
-    {:ok, s} = Process.start_link("odu", ["-invalid"], %{use_stderr: true})
+    {:ok, s} = Process.start_link("odu", ["-invalid"], %{no_stderr: false})
     :ok = Process.run(s)
     :ok = Process.open_input(s)
     :ok = Process.open_output(s)
@@ -162,6 +162,22 @@ defmodule ExCmd.ProcessTest do
     assert {:ok, "flag provided but not defined: -invalid\n" <> _} = Process.read_error(s)
 
     assert {:done, 2} == Process.status(s)
+  end
+
+  test "no_stdin option" do
+    {:ok, s} = Process.start_link("echo", ["hello"], %{no_stdin: true})
+    :ok = Process.run(s)
+    :ok = Process.open_output(s)
+    assert {:ok, "hello\n"} == Process.read(s)
+    assert :eof == Process.read(s)
+    # exit status from terminated command is async
+    :timer.sleep(100)
+    assert {:done, 0} == Process.status(s)
+  end
+
+  test "open_input on no_stdin" do
+    {:ok, s} = Process.start_link("echo", ["hello"], %{no_stdin: true})
+    assert {:error, :unused_stream} = Process.open_input(s)
   end
 
   def start_parallel_reader(proc_server, logger) do

@@ -17,15 +17,18 @@ defmodule ExCmd.Process do
   life-cycle of IO streams and OS process.
   """
 
-  @default %{log: false, use_stderr: false}
+  @default %{log: false, no_stdin: false, no_stderr: true}
 
   @doc """
   Starts `ExCmd.ProcessServer`
 
   Starts a process for running `cmd` with arguments `args` with options `opts`. Note that this does not run the program immediately. User has to explicitly run by calling `run/1`, `open_input/1`, `open_output/1` depending on the program.
 
+  By default, ExCmd assumes that the command uses both stdin and stdout. So both streams (Enumerable and Collectable) *must* be used even if the command does not use it. You can change this behaviour by passing `no_stdin` option for commands which does not read input fron stdin (such as `find` command). see `ExCmd.Process` options for more detils.
+
   ### Options
-    * `use_stderr`     -  Whether to allow reading from stderr. Note that setting `true` but not reading from stderr might block external program due to back-pressure. Defaults to `false`
+    * `no_stdin`       -  If set to true, User does not need to use collectable stream. ExCmd assumes that the command does not read input from stdin. Defaults to `false`
+    * `no_stderr`      -  Whether to allow reading from stderr. Note that setting `true` but not reading from stderr might block external program due to back-pressure. Defaults to `true`
     * `log`            -  When set to `true` odu outputs are logged. Defaults to `false`
   """
   def start_link(cmd, args, opts \\ %{}) do

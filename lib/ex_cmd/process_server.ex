@@ -36,19 +36,22 @@ defmodule ExCmd.ProcessServer do
 
     Temp.track!()
     dir = Temp.mkdir!()
-    input_fifo_path = Temp.path!(%{basedir: dir})
-    FIFO.create(input_fifo_path)
+
+    input_fifo_path =
+      unless params.opts.no_stdin do
+        path = Temp.path!(%{basedir: dir})
+        FIFO.create(path)
+        path
+      end
 
     output_fifo_path = Temp.path!(%{basedir: dir})
     FIFO.create(output_fifo_path)
 
     error_fifo_path =
-      if params.opts.use_stderr do
+      unless params.opts.no_stderr do
         path = Temp.path!(%{basedir: dir})
         FIFO.create(path)
         path
-      else
-        nil
       end
 
     {:noreply,
@@ -73,24 +76,22 @@ defmodule ExCmd.ProcessServer do
     {:reply, :ok, Map.merge(state, %{port: port, state: :started})}
   end
 
-  def handle_call(
-        {:open_fifo, :error, _},
-        _from,
-        %{params: %{opts: %{use_stderr: false}}} = state
-      ) do
-    {:reply, {:error, :invalid_operation}, state}
-  end
-
   # All blocking FIFO operations such as open, read, write etc, should
   # be offloaded to specific fifo GenServer. ProcessServer must be
   # non-blocking
   def handle_call({:open_fifo, type, mode}, from, state) do
-    if state[type] do
-      {:reply, {:error, :already_opened}, state}
-    else
-      {:ok, fifo} = GenServer.start_link(FIFO, %{path: state.fifo_paths[type], mode: mode})
-      FIFO.open(fifo, from)
-      {:noreply, Map.put(state, type, fifo)}
+    cond do
+      !state.fifo_paths[type] ->
+        Logger.debug(fn -> "Can not open unused #{type} stream" end)
+        {:reply, {:error, :unused_stream}, state}
+
+      state[type] ->
+        {:reply, {:error, :already_opened}, state}
+
+      true ->
+        {:ok, fifo} = GenServer.start_link(FIFO, %{path: state.fifo_paths[type], mode: mode})
+        FIFO.open(fifo, from)
+        {:noreply, Map.put(state, type, fifo)}
     end
   end
 
@@ -125,6 +126,10 @@ defmodule ExCmd.ProcessServer do
     {:reply, Port.info(state.port), state}
   end
 
+  def handle_call({:write, _}, _, %{fifo_paths: %{input: nil}} = state) do
+    {:reply, {:error, :unused_stream}, state}
+  end
+
   def handle_call({:write, _}, _, %{input: :closed} = state) do
     {:reply, {:error, :closed}, state}
   end
@@ -157,13 +162,19 @@ defmodule ExCmd.ProcessServer do
   end
 
   def handle_call(:close_input, _, state) do
-    if state[:input] == :closed do
-      {:reply, :ok, state}
-    else
-      # can not use :normal as a process might have pending write which
-      # can exit delay arbirarily
-      Process.exit(state.input, :force_close)
-      {:reply, :ok, %{state | input: :closed}}
+    cond do
+      !state.fifo_paths[:input] ->
+        Logger.debug(fn -> "Can not close unused input stream" end)
+        {:reply, {:error, :unused_stream}, state}
+
+      state[:input] == :closed ->
+        {:reply, :ok, state}
+
+      true ->
+        # can not use :normal as a process might have pending write which
+        # can exit delay arbirarily
+        Process.exit(state.input, :force_close)
+        {:reply, :ok, %{state | input: :closed}}
     end
   end
 
@@ -208,6 +219,6 @@ defmodule ExCmd.ProcessServer do
     odu_config_params = ["-log", if(opts[:log], do: "|2", else: "")]
 
     odu_config_params ++
-      ["-stdin", input_path, "-stdout", output_path, "-stderr", error_path || ""]
+      ["-stdin", input_path || "", "-stdout", output_path, "-stderr", error_path || ""]
   end
 end

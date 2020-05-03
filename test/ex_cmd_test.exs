@@ -17,4 +17,10 @@ defmodule ExCmdTest do
 
     assert IO.iodata_length(output) == 1000 * String.length(str)
   end
+
+  test "stream without stdin" do
+    proc_stream = ExCmd.stream!("echo", ["hello"], %{no_stdin: true})
+    output = proc_stream |> Enum.to_list()
+    assert output == ["hello\n"]
+  end
 end
