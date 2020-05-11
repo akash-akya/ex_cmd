@@ -24,7 +24,17 @@ File.stream!("music_video.mkv", [], 65535)
 
 `ExCmd.stream!` is a convenience wrapper around `ExCmd.ProcServer`. If you want more control over stdin, stdout and os process use `ExCmd.ProcServer` directly.
 
-*Note: ExCmd is still work-in-progress. Expect breaking changes*
+### Please read this before proceeding
+
+**ExCmd uses `:file` module do IO using named pipes. File io operations with `:raw` mode are blocking operations. This can cause several issues. For example if you are executing a program which is slow and do `read` on its output, the read operation effectively blocks a scheduler (dirty IO scheduler) until the read request is fulfilled by the external program. This is how file operations are implemented in beam and there are no non-blocking alternatives at the moment. If you are still reading, are few ways to mitigate this issue**
+
+1. limit number of parallel execution using a pooling library or adjust concurrency of background job which executes the program
+2. increase dirty schedulers count using [`+SDio`](https://erlang.org/doc/man/erl.html) VM arg
+3. read or write in smaller chunks
+
+If you are executing a few programs this should not be a major issue.
+
+**Check out [Exile](https://github.com/akash-akya/exile) which is NIF based solution to fix these issues**
 
 ### Why not use built-in ports?
 * Unlike beam ports, ExCmd puts back pressure on the external program
@@ -34,19 +44,11 @@ File.stream!("music_video.mkv", [], 65535)
 If all you want is to run a command with no communication, then just sticking with `System.cmd` is a better option.
 
 ## Overview
-Each `ExCmd.ProcessServer` process maps to an OS process. Internally `ExCmd.ProcessServer` creates and manages separate processes for each of the IO streams (Stdin, Stdout, Stderr) and a port that maps to an OS process (an `odu` process). Keeping input, output and the OS process as a separate beam process helps us to handle them independently (closing stdin, blocking the OS process by not opening stdout pipe). Conceptually this directly maps to the OS primitives. Blocking functions such as `read` and `write` only blocks the calling process, not the `ExCmd.Process` itself. A blocking read does *not* block a parallel write. These blocking calls are the primitives for building back-pressure.
+Each `ExCmd.ProcessServer` process maps to an OS process. Internally `ExCmd.ProcessServer` creates and manages separate processes for each of the IO streams (Stdin, Stdout, Stderr) and a port that maps to an OS process (an `odu` process). Keeping input, output and the OS process as a separate beam process helps us to handle them independently (closing stdin, blocking the OS process by not opening stdout pipe). Conceptually this directly maps to the OS primitives.
 
 For most of the use-cases using `ExCmd.stream!` abstraction should be enough. Use `ExCmd.ProcessServer` only if you need more control over the life-cycle of IO streams and OS process.
 
 Check [documentation](https://hexdocs.pm/ex_cmd/readme.html) for information
-
-### Why not use NIF?
-These are essentially same as "why use port over NIF"
-* **Safety:** Failures in external command or ExCmd doesn't bring whole VM down
-* **Scheduling:** ExCmd plays well with the beam scheduler, you don't have to worry about blocking scheduler
-* **Ease:** It is easier to work with an Elixir library than to understanding NIF
-* **Ergonomics:** ExCmd can be thought as just linking your beam processes and external program with good old pipes
-
 
 ExCmd uses [odu](https://github.com/akash-akya/odu) as a middleware to fill the gaps left ports.
 

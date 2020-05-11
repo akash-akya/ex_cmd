@@ -172,7 +172,7 @@ defmodule ExCmd.ProcessServer do
 
       true ->
         # can not use :normal as a process might have pending write which
-        # can exit delay arbirarily
+        # can delay exit arbitrarily
         Process.exit(state.input, :force_close)
         {:reply, :ok, %{state | input: :closed}}
     end
