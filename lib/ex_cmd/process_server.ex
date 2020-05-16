@@ -3,7 +3,7 @@ defmodule ExCmd.ProcessServer do
   alias ExCmd.FIFO
   use GenServer
 
-  def start_link(cmd, args, opts \\ %{}) do
+  def start_link([cmd | args], opts \\ %{}) do
     odu_path = :os.find_executable('odu')
 
     if !odu_path do
@@ -18,12 +18,7 @@ defmodule ExCmd.ProcessServer do
 
     GenServer.start_link(
       __MODULE__,
-      %{
-        odu_path: odu_path,
-        cmd_path: cmd_path,
-        args: args,
-        opts: opts
-      }
+      %{odu_path: odu_path, cmd_with_args: [to_string(cmd_path) | args], opts: opts}
     )
   end
 
@@ -38,7 +33,7 @@ defmodule ExCmd.ProcessServer do
     dir = Temp.mkdir!()
 
     input_fifo_path =
-      unless params.opts.no_stdin do
+      unless params.opts[:no_stdin] do
         path = Temp.path!(%{basedir: dir})
         FIFO.create(path)
         path
@@ -48,7 +43,7 @@ defmodule ExCmd.ProcessServer do
     FIFO.create(output_fifo_path)
 
     error_fifo_path =
-      unless params.opts.no_stderr do
+      unless params.opts[:no_stderr] do
         path = Temp.path!(%{basedir: dir})
         FIFO.create(path)
         path
@@ -209,7 +204,7 @@ defmodule ExCmd.ProcessServer do
   defp start_odu_port(params, input_path, output_path, error_path) do
     args =
       build_odu_params(params.opts, input_path, output_path, error_path) ++
-        ["--", to_string(params.cmd_path) | params.args]
+        ["--" | params.cmd_with_args]
 
     options = [:use_stdio, :exit_status, :binary, :hide, {:packet, 2}, args: args]
     Port.open({:spawn_executable, params.odu_path}, options)

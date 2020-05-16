@@ -17,7 +17,7 @@ defmodule ExCmd.Process do
   life-cycle of IO streams and OS process.
   """
 
-  @default %{log: false, no_stdin: false, no_stderr: true}
+  @default [log: false, no_stdin: false, no_stderr: true]
 
   @doc """
   Starts `ExCmd.ProcessServer`
@@ -31,9 +31,9 @@ defmodule ExCmd.Process do
     * `no_stderr`      -  Whether to allow reading from stderr. Note that setting `true` but not reading from stderr might block external program due to back-pressure. Defaults to `true`
     * `log`            -  When set to `true` odu outputs are logged. Defaults to `false`
   """
-  def start_link(cmd, args, opts \\ %{}) do
-    opts = Map.merge(@default, opts)
-    ExCmd.ProcessServer.start_link(cmd, args, opts)
+  def start_link(cmd_with_args, opts \\ []) do
+    opts = Keyword.merge(@default, opts)
+    ExCmd.ProcessServer.start_link(cmd_with_args, opts)
   end
 
   @doc """

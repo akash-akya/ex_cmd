@@ -3,7 +3,7 @@ defmodule ExCmd.ProcessTest do
   alias ExCmd.Process
 
   test "read" do
-    {:ok, s} = Process.start_link("echo", ["test"])
+    {:ok, s} = Process.start_link(~w(echo test))
     :ok = Process.run(s)
     :ok = Process.open_input(s)
     :ok = Process.open_output(s)
@@ -16,7 +16,7 @@ defmodule ExCmd.ProcessTest do
   end
 
   test "write" do
-    {:ok, s} = Process.start_link("cat", [])
+    {:ok, s} = Process.start_link(~w(cat))
     :ok = Process.run(s)
     :ok = Process.open_input(s)
     :ok = Process.open_output(s)
@@ -38,7 +38,7 @@ defmodule ExCmd.ProcessTest do
     # base64 produces output only after getting EOF from stdin.  we
     # collect events in order and assert that we can still read from
     # stdout even after closing stdin
-    {:ok, s} = Process.start_link("base64", [])
+    {:ok, s} = Process.start_link(~w(base64))
     :ok = Process.run(s)
     :ok = Process.open_input(s)
     :ok = Process.open_output(s)
@@ -68,7 +68,7 @@ defmodule ExCmd.ProcessTest do
   end
 
   test "external command kill" do
-    {:ok, s} = Process.start_link("cat", [])
+    {:ok, s} = Process.start_link(~w(cat))
     :ok = Process.run(s)
     :ok = Process.open_input(s)
     :ok = Process.open_output(s)
@@ -85,7 +85,7 @@ defmodule ExCmd.ProcessTest do
 
   test "external command forceful kill" do
     # cat command hangs waiting for EOF
-    {:ok, s} = Process.start_link("cat", [])
+    {:ok, s} = Process.start_link(~w(cat))
     :ok = Process.run(s)
     :ok = Process.open_input(s)
     :ok = Process.open_output(s)
@@ -103,7 +103,7 @@ defmodule ExCmd.ProcessTest do
   end
 
   test "exit status" do
-    {:ok, s} = Process.start_link("odu", ["-invalid"])
+    {:ok, s} = Process.start_link(~w(odu -invalid))
     :ok = Process.run(s)
     :ok = Process.open_input(s)
     :ok = Process.open_output(s)
@@ -113,7 +113,7 @@ defmodule ExCmd.ProcessTest do
 
   test "abnormal exit of fifo" do
     Elixir.Process.flag(:trap_exit, true)
-    {:ok, s} = Process.start_link("cat", [])
+    {:ok, s} = Process.start_link(~w(cat))
     :ok = Process.run(s)
     :ok = Process.open_input(s)
     :ok = Process.open_output(s)
@@ -125,7 +125,7 @@ defmodule ExCmd.ProcessTest do
   end
 
   test "explicite exit of fifo" do
-    {:ok, s} = Process.start_link("cat", [])
+    {:ok, s} = Process.start_link(~w(cat))
     :ok = Process.run(s)
     :ok = Process.open_input(s)
     :ok = Process.open_output(s)
@@ -136,7 +136,7 @@ defmodule ExCmd.ProcessTest do
   end
 
   test "process kill with parallel blocking write" do
-    {:ok, s} = Process.start_link("cat", [])
+    {:ok, s} = Process.start_link(~w(cat))
     :ok = Process.run(s)
     :ok = Process.open_input(s)
     :ok = Process.open_output(s)
@@ -152,7 +152,7 @@ defmodule ExCmd.ProcessTest do
   end
 
   test "stderr" do
-    {:ok, s} = Process.start_link("odu", ["-invalid"], %{no_stderr: false})
+    {:ok, s} = Process.start_link(~w(odu -invalid), no_stderr: false)
     :ok = Process.run(s)
     :ok = Process.open_input(s)
     :ok = Process.open_output(s)
@@ -165,7 +165,7 @@ defmodule ExCmd.ProcessTest do
   end
 
   test "no_stdin option" do
-    {:ok, s} = Process.start_link("echo", ["hello"], %{no_stdin: true})
+    {:ok, s} = Process.start_link(~w(echo hello), no_stdin: true)
     :ok = Process.run(s)
     :ok = Process.open_output(s)
     assert {:ok, "hello\n"} == Process.read(s)
@@ -176,7 +176,7 @@ defmodule ExCmd.ProcessTest do
   end
 
   test "open_input on no_stdin" do
-    {:ok, s} = Process.start_link("echo", ["hello"], %{no_stdin: true})
+    {:ok, s} = Process.start_link(~w(echo hello), no_stdin: true)
     assert {:error, :unused_stream} = Process.open_input(s)
   end
 
