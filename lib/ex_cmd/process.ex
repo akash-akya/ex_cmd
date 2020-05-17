@@ -3,18 +3,9 @@ defmodule ExCmd.Process do
   Helper to interact with `ExCmd.ProcessServer`
 
   ## Overview
-  Each `ExCmd.ProcessServer` process maps to an instance of port (and
-  an OS process). Internally `ExCmd.ProcessServer` creates and manages
-  separate processes for each of the IO streams (Stdin, Stdout,
-  Stderr) and a port that maps to an OS process of `odu`. Blocking
-  functions such as `read` and `write` only blocks the calling
-  process, not the `ExCmd.Process` itself. A blocking read does
-  *not* block a parallel write. Blocking calls are the primitives for
-  building back-pressure.
+  Each `ExCmd.ProcessServer` process maps to an instance of port (and an OS process). Internally `ExCmd.ProcessServer` creates and manages separate processes for each of the IO streams (Stdin, Stdout, Stderr) and a port that maps to an OS process of `odu`. Blocking operations such as `read` and `write` only blocks that stream, not the `ExCmd.Process` itself. For example, a blocking read does *not* block a parallel write.
 
-  For most of the use-cases using `ExCmd.stream!` abstraction should
-  be enough. Use this only if you need more control over the
-  life-cycle of IO streams and OS process.
+  `ExCmd.stream!` should be preferred over this. Use this only if you need more control over the life-cycle of IO streams and OS process.
   """
 
   @default [log: false, no_stdin: false, no_stderr: true]
@@ -22,9 +13,9 @@ defmodule ExCmd.Process do
   @doc """
   Starts `ExCmd.ProcessServer`
 
-  Starts a process for running `cmd` with arguments `args` with options `opts`. Note that this does not run the program immediately. User has to explicitly run by calling `run/1`, `open_input/1`, `open_output/1` depending on the program.
+  Starts a process using `cmd_with_args` and with options `opts`. start_link does not start the external program. It should be started with `run` explicitly.
 
-  By default, ExCmd assumes that the command uses both stdin and stdout. So both streams (Enumerable and Collectable) *must* be used even if the command does not use it. You can change this behaviour by passing `no_stdin` option for commands which does not read input fron stdin (such as `find` command). see `ExCmd.Process` options for more detils.
+  `cmd_with_args` must be a list containing command with arguments. example: `["cat", "file.txt"]`.
 
   ### Options
     * `no_stdin`       -  If set to true, User does not need to use collectable stream. ExCmd assumes that the command does not read input from stdin. Defaults to `false`
@@ -40,21 +31,6 @@ defmodule ExCmd.Process do
   Opens the port and runs the program
   """
   def run(server), do: GenServer.call(server, :run)
-
-  @doc """
-  Opens the input stream of the program for writing. Blocks till reader opens
-  """
-  def open_input(server), do: GenServer.call(server, {:open_fifo, :input, :write})
-
-  @doc """
-  Opens the output stream of the program for reading. Blocks till writer opens
-  """
-  def open_output(server), do: GenServer.call(server, {:open_fifo, :output, :read})
-
-  @doc """
-  Opens the error stream of the program for reading. Blocks till writer opens
-  """
-  def open_error(server), do: GenServer.call(server, {:open_fifo, :error, :read})
 
   @doc """
   Return bytes written by the program to output stream.
@@ -97,7 +73,7 @@ defmodule ExCmd.Process do
   @doc """
   Closes input stream. Which signal EOF to the program
   """
-  def close_input(server), do: GenServer.call(server, :close_input)
+  def close_stdin(server), do: GenServer.call(server, :close_stdin)
 
   @doc """
   Kills the program

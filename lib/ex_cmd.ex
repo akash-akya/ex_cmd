@@ -25,15 +25,14 @@ defmodule ExCmd do
                            |> Enum.to_list()
                            ```
                            By defaults no input will be given to the command
-    * `cd`               - The directory to run the command in
     * `exit_timeout`     - Duration to wait for external program to exit after completion before raising an error. Defaults to `:infinity`
-    * `chunk_size`       - Size of each iodata chunk emitted by Enumerable stream. When set to `nil` the output is unbuffered and chunk size will be variable. Defaults to 65535
-  All other options are passed to `ExCmd.Process.start_link/3` except `:no_stdin` which will be set based on `input` option
+    * `chunk_size`       - Size of each iodata chunk emitted by Enumerable stream. When set to `nil` the output is unbuffered and chunk size will be variable. Defaults to 65336
+  All other options are passed to `ExCmd.Process.start_link/3` except `:no_stdin` which will be set based on `input` option and `:no_stderr` which will be always set to `false`][]
 
   ### Example
 
   ``` elixir
-  ExCmd.stream!(~w(ffmpeg -i pipe:0 -f mp3 pipe:1), input: File.stream!("music_video.mkv", [], 65535))
+  ExCmd.stream!(~w(ffmpeg -i pipe:0 -f mp3 pipe:1), input: File.stream!("music_video.mkv", [], 65336))
   |> Stream.into(File.stream!("music.mp3"))
   |> Stream.run()
   ```

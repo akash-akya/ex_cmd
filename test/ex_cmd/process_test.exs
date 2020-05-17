@@ -5,11 +5,9 @@ defmodule ExCmd.ProcessTest do
   test "read" do
     {:ok, s} = Process.start_link(~w(echo test))
     :ok = Process.run(s)
-    :ok = Process.open_input(s)
-    :ok = Process.open_output(s)
     assert {:ok, "test\n"} == Process.read(s)
     assert :eof == Process.read(s)
-    assert :ok == Process.close_input(s)
+    assert :ok == Process.close_stdin(s)
     # exit status from terminated command is async
     :timer.sleep(100)
     assert {:done, 0} == Process.status(s)
@@ -18,13 +16,11 @@ defmodule ExCmd.ProcessTest do
   test "write" do
     {:ok, s} = Process.start_link(~w(cat))
     :ok = Process.run(s)
-    :ok = Process.open_input(s)
-    :ok = Process.open_output(s)
     assert :ok == Process.write(s, "hello")
     assert {:ok, "hello"} == Process.read(s)
     assert :ok == Process.write(s, "world")
     assert {:ok, "world"} == Process.read(s)
-    assert :ok == Process.close_input(s)
+    assert :ok == Process.close_stdin(s)
     assert :eof == Process.read(s)
 
     # exit status from terminated command is async
@@ -40,8 +36,6 @@ defmodule ExCmd.ProcessTest do
     # stdout even after closing stdin
     {:ok, s} = Process.start_link(~w(base64))
     :ok = Process.run(s)
-    :ok = Process.open_input(s)
-    :ok = Process.open_output(s)
 
     # parallel reader should be blocked till we close stdin
     start_parallel_reader(s, logger)
@@ -53,7 +47,7 @@ defmodule ExCmd.ProcessTest do
     add_event(logger, {:write, "world"})
     :timer.sleep(50)
 
-    assert :ok == Process.close_input(s)
+    assert :ok == Process.close_stdin(s)
     add_event(logger, :input_close)
     :timer.sleep(50)
     assert {:done, 0} == Process.status(s)
@@ -70,12 +64,10 @@ defmodule ExCmd.ProcessTest do
   test "external command kill" do
     {:ok, s} = Process.start_link(~w(cat))
     :ok = Process.run(s)
-    :ok = Process.open_input(s)
-    :ok = Process.open_output(s)
     os_pid = Process.port_info(s)[:os_pid]
     assert os_process_alive?(os_pid)
 
-    Process.close_input(s)
+    Process.close_stdin(s)
 
     Process.stop(s)
     :timer.sleep(100)
@@ -87,8 +79,6 @@ defmodule ExCmd.ProcessTest do
     # cat command hangs waiting for EOF
     {:ok, s} = Process.start_link(~w(cat))
     :ok = Process.run(s)
-    :ok = Process.open_input(s)
-    :ok = Process.open_output(s)
 
     os_pid = Process.port_info(s)[:os_pid]
     assert os_process_alive?(os_pid)
@@ -105,8 +95,6 @@ defmodule ExCmd.ProcessTest do
   test "exit status" do
     {:ok, s} = Process.start_link(~w(odu -invalid))
     :ok = Process.run(s)
-    :ok = Process.open_input(s)
-    :ok = Process.open_output(s)
     :timer.sleep(500)
     assert {:done, 2} == Process.status(s)
   end
@@ -115,8 +103,6 @@ defmodule ExCmd.ProcessTest do
     Elixir.Process.flag(:trap_exit, true)
     {:ok, s} = Process.start_link(~w(cat))
     :ok = Process.run(s)
-    :ok = Process.open_input(s)
-    :ok = Process.open_output(s)
 
     pid = spawn_link(fn -> Process.write(s, :invalid) end)
     assert_receive {:EXIT, ^pid, reason} when reason != :normal
@@ -127,10 +113,8 @@ defmodule ExCmd.ProcessTest do
   test "explicite exit of fifo" do
     {:ok, s} = Process.start_link(~w(cat))
     :ok = Process.run(s)
-    :ok = Process.open_input(s)
-    :ok = Process.open_output(s)
 
-    Process.close_input(s)
+    Process.close_stdin(s)
     :timer.sleep(100)
     assert Elixir.Process.alive?(s) == true
   end
@@ -138,8 +122,6 @@ defmodule ExCmd.ProcessTest do
   test "process kill with parallel blocking write" do
     {:ok, s} = Process.start_link(~w(cat))
     :ok = Process.run(s)
-    :ok = Process.open_input(s)
-    :ok = Process.open_output(s)
 
     large_data = Stream.cycle(["test"]) |> Stream.take(100_000) |> Enum.to_list()
     pid = Task.async(fn -> Process.write(s, large_data) end)
@@ -154,9 +136,6 @@ defmodule ExCmd.ProcessTest do
   test "stderr" do
     {:ok, s} = Process.start_link(~w(odu -invalid), no_stderr: false)
     :ok = Process.run(s)
-    :ok = Process.open_input(s)
-    :ok = Process.open_output(s)
-    :ok = Process.open_error(s)
     :timer.sleep(500)
 
     assert {:ok, "flag provided but not defined: -invalid\n" <> _} = Process.read_error(s)
@@ -167,17 +146,11 @@ defmodule ExCmd.ProcessTest do
   test "no_stdin option" do
     {:ok, s} = Process.start_link(~w(echo hello), no_stdin: true)
     :ok = Process.run(s)
-    :ok = Process.open_output(s)
     assert {:ok, "hello\n"} == Process.read(s)
     assert :eof == Process.read(s)
     # exit status from terminated command is async
     :timer.sleep(100)
     assert {:done, 0} == Process.status(s)
-  end
-
-  test "open_input on no_stdin" do
-    {:ok, s} = Process.start_link(~w(echo hello), no_stdin: true)
-    assert {:error, :unused_stream} = Process.open_input(s)
   end
 
   def start_parallel_reader(proc_server, logger) do

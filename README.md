@@ -4,7 +4,7 @@ ExCmd is an Elixir library to run and communicate with external programs with ba
 
 ExCmd is built around the idea of streaming data through an external program. Think streaming a video through `ffmpeg` to server a web request. For example, getting audio out of a stream is as simple as
 ``` elixir
-ExCmd.stream!(~w(ffmpeg -i pipe:0 -f mp3 pipe:1), input: File.stream!("music_video.mkv", [], 65535))
+ExCmd.stream!(~w(ffmpeg -i pipe:0 -f mp3 pipe:1), input: File.stream!("music_video.mkv", [], 65336))
 |> Stream.into(File.stream!("music.mp3"))
 |> Stream.run()
 ```

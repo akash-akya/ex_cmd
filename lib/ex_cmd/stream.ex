@@ -10,21 +10,16 @@ defmodule ExCmd.Stream do
 
     defimpl Collectable do
       def into(%{process: process} = stream) do
-        case Process.open_input(process) do
-          :ok -> :ok
-          {:error, :unused_stream} -> raise "Can not use Collectable stream with :no_stdin option"
-        end
-
         collector_fun = fn
           :ok, {:cont, x} ->
             :ok = Process.write(process, x)
 
           :ok, :done ->
-            :ok = Process.close_input(process)
+            :ok = Process.close_stdin(process)
             stream
 
           :ok, :halt ->
-            :ok = Process.close_input(process)
+            :ok = Process.close_stdin(process)
         end
 
         {:ok, collector_fun}
@@ -34,7 +29,7 @@ defmodule ExCmd.Stream do
 
   defstruct [:process, :stream_opts]
 
-  @default_opts [exit_timeout: :infinity, chunk_size: 65535]
+  @default_opts [exit_timeout: :infinity, chunk_size: 65336]
 
   @type t :: %__MODULE__{}
 
@@ -45,7 +40,12 @@ defmodule ExCmd.Stream do
     no_stdin = !stream_opts[:input]
 
     {:ok, process} =
-      Process.start_link(cmd_with_args, Keyword.put(process_opts, :no_stdin, no_stdin))
+      Process.start_link(
+        cmd_with_args,
+        Keyword.merge(process_opts, no_stdin: no_stdin, no_stderr: true)
+      )
+
+    :ok = Process.run(process)
 
     start_input_streamer(%Sink{process: process}, stream_opts[:input])
     %ExCmd.Stream{process: process, stream_opts: stream_opts}
@@ -75,10 +75,7 @@ defmodule ExCmd.Stream do
 
   defimpl Enumerable do
     def reduce(%{process: process, stream_opts: stream_opts}, acc, fun) do
-      start_fun = fn ->
-        :ok = Process.run(process)
-        :ok = Process.open_output(process)
-      end
+      start_fun = fn -> :ok end
 
       next_fun = fn :ok ->
         case Process.read(process) do
@@ -96,7 +93,7 @@ defmodule ExCmd.Stream do
       after_fun = fn exit_type ->
         try do
           # always close stdin before stoping to give the command chance to exit properly
-          Process.close_input(process)
+          Process.close_stdin(process)
 
           result = Process.await_exit(process, stream_opts[:exit_timeout])
 

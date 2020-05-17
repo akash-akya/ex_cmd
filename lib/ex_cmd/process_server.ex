@@ -1,4 +1,6 @@
 defmodule ExCmd.ProcessServer do
+  @moduledoc false
+
   require Logger
   alias ExCmd.FIFO
   use GenServer
@@ -68,28 +70,19 @@ defmodule ExCmd.ProcessServer do
   def handle_call(:run, _, state) do
     paths = state.fifo_paths
     port = start_odu_port(state.params, paths.input, paths.output, paths.error)
-    {:reply, :ok, Map.merge(state, %{port: port, state: :started})}
+
+    # ordering matters. see: func openIOFiles(...) in odu
+    input = open_fifo(paths.input, :write)
+    output = open_fifo(paths.output, :read)
+    error = open_fifo(paths.error, :read)
+
+    {:reply, :ok,
+     Map.merge(state, %{port: port, state: :started, input: input, output: output, error: error})}
   end
 
   # All blocking FIFO operations such as open, read, write etc, should
   # be offloaded to specific fifo GenServer. ProcessServer must be
   # non-blocking
-  def handle_call({:open_fifo, type, mode}, from, state) do
-    cond do
-      !state.fifo_paths[type] ->
-        Logger.debug(fn -> "Can not open unused #{type} stream" end)
-        {:reply, {:error, :unused_stream}, state}
-
-      state[type] ->
-        {:reply, {:error, :already_opened}, state}
-
-      true ->
-        {:ok, fifo} = GenServer.start_link(FIFO, %{path: state.fifo_paths[type], mode: mode})
-        FIFO.open(fifo, from)
-        {:noreply, Map.put(state, type, fifo)}
-    end
-  end
-
   def handle_call({:await_exit, _}, _, %{state: {:done, status}} = state) do
     {:reply, {:ok, status}, state}
   end
@@ -156,7 +149,7 @@ defmodule ExCmd.ProcessServer do
     end
   end
 
-  def handle_call(:close_input, _, state) do
+  def handle_call(:close_stdin, _, state) do
     cond do
       !state.fifo_paths[:input] ->
         Logger.debug(fn -> "Can not close unused input stream" end)
@@ -199,6 +192,14 @@ defmodule ExCmd.ProcessServer do
   def handle_info({:await_timeout, pid}, state) do
     GenServer.reply(pid, :timeout)
     {:noreply, Map.update!(state, :waiting_processes, &Map.delete(&1, pid))}
+  end
+
+  def open_fifo(nil, _mode), do: nil
+
+  def open_fifo(path, mode) do
+    {:ok, fifo} = GenServer.start_link(FIFO, %{path: path, mode: mode})
+    FIFO.open(fifo)
+    fifo
   end
 
   defp start_odu_port(params, input_path, output_path, error_path) do
