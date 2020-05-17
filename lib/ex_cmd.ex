@@ -3,53 +3,41 @@ defmodule ExCmd do
   ExCmd is an Elixir library to run and communicate with external programs with back-pressure.
   """
 
-  @default_opts %{exit_timeout: :infinity}
-
   @doc """
-  Returns a `ExCmd.Stream` for the given `cmd` with arguments `args`.
+  Runs the given command with arguments and return an Enumerable to read command output.
 
-  The stream implements both `Enumerable` and `Collectable` protocols,
-  which means it can be used both for reading from stdout and write to
-  stdin of an OS process simultaneously (see examples).
-
-  By default, ExCmd assumes that the command uses both stdin and
-  stdout. So both streams (Enumerable and Collectable) *must* be used
-  even if the command does not use it. You can change this behaviour
-  by passing `no_stdin` option for commands which does not read input
-  fron stdin (such as `find` command). see `ExCmd.Process` options for
-  more detils.
+  First parameter must be a list containing command with arguments. example: `["cat", "file.txt"]`.
 
   ### Options
-    * `exit_timeout`     - Duration to wait for external program to terminate after completion before raising an error. Defaults to `:infinity`
-  All other options are passed to `ExCmd.Process.start_link/3`
+    * `input`            - Input can be either an `Enumerable` or a function which accepts `Collectable`.
+                           1. input as Enumerable:
+                           ```elixir
+                           # List
+                           ExCmd.stream!(~w(bc -q), input: ["1+1\n", "2*2\n"]) |> Enum.to_list()
 
-  Since reading and writing are blocking actions, these should be done
-  in separate processes (unless you know each input producess an
-  output)
+                           # Stream
+                           ExCmd.stream!(~w(cat), input: File.stream!("log.txt", [], 65536)) |> Enum.to_list()
+                           ```
+                           2. input as collectable:
+                           If the input in a function with arity 1, ex_cmd will call that function with a `Collectable` as the argument. The function must *push* input to this collectable. Return value of the function is ignored.
+                           ```elixir
+                           ExCmd.stream!(~w(cat), input: fn sink -> Enum.into(1..100, sink, &to_string/1) end)
+                           |> Enum.to_list()
+                           ```
+                           By defaults no input will be given to the command
+    * `exit_timeout`     - Duration to wait for external program to exit after completion before raising an error. Defaults to `:infinity`
+    * `chunk_size`       - Size of each iodata chunk emitted by Enumerable stream. When set to `nil` the output is unbuffered and chunk size will be variable. Defaults to 65336
+  All other options are passed to `ExCmd.Process.start_link/3` except `:no_stdin` which will be set based on `input` option and `:no_stderr` which will be always set to `false`][]
 
-  ### Examples
+  ### Example
 
   ``` elixir
-  def audio_stream!(stream) do
-    # read from stdin and write to stdout
-    proc_stream = ExCmd.stream!("ffmpeg", ~w(-i - -f mp3 -))
-
-    Task.async(fn ->
-      Stream.into(stream, proc_stream)
-      |> Stream.run()
-    end)
-
-    proc_stream
-  end
-
-  File.stream!("music_video.mkv", [], 65535)
-  |> audio_stream!()
+  ExCmd.stream!(~w(ffmpeg -i pipe:0 -f mp3 pipe:1), input: File.stream!("music_video.mkv", [], 65336))
   |> Stream.into(File.stream!("music.mp3"))
   |> Stream.run()
   ```
   """
-  def stream!(cmd, args \\ [], opts \\ %{}) do
-    opts = Map.merge(@default_opts, opts)
-    ExCmd.Stream.__build__(cmd, args, opts)
+  def stream!(cmd_with_args, opts \\ []) do
+    ExCmd.Stream.__build__(cmd_with_args, opts)
   end
 end
