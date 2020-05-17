@@ -153,6 +153,33 @@ defmodule ExCmd.ProcessTest do
     assert {:done, 0} == Process.status(s)
   end
 
+  test "multiple await_exit" do
+    {:ok, s} = Process.start_link(~w(cat))
+    :ok = Process.run(s)
+
+    tasks =
+      for _ <- 1..5 do
+        Task.async(fn ->
+          Process.await_exit(s, :infinity)
+        end)
+      end
+
+    Process.close_stdin(s)
+
+    for task <- tasks do
+      assert {:ok, 0} == Task.await(task)
+    end
+  end
+
+  test "await_exit timeout" do
+    {:ok, s} = Process.start_link(~w(cat))
+    :ok = Process.run(s)
+    assert :timeout = Process.await_exit(s, 100)
+    assert {:started, %{waiting_processes: waiting_processes}} = :sys.get_state(s)
+    assert MapSet.size(waiting_processes) == 0
+    assert :ok = Process.stop(s)
+  end
+
   def start_parallel_reader(proc_server, logger) do
     spawn_link(fn -> reader_loop(proc_server, logger) end)
   end
