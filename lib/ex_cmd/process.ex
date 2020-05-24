@@ -30,7 +30,7 @@ defmodule ExCmd.Process do
   @doc """
   Opens the port and runs the program
   """
-  def run(server), do: GenServer.call(server, :run)
+  def run(server), do: GenStateMachine.call(server, :run)
 
   @doc """
   Return bytes written by the program to output stream.
@@ -40,7 +40,7 @@ defmodule ExCmd.Process do
   @spec read(pid, non_neg_integer | :infinity) ::
           {:ok, iodata} | :eof | {:error, String.t()} | :closed
   def read(server, timeout \\ :infinity) do
-    GenServer.call(server, :read, timeout)
+    GenStateMachine.call(server, :read, timeout)
   catch
     :exit, {:normal, _} -> :closed
   end
@@ -53,7 +53,7 @@ defmodule ExCmd.Process do
   @spec read_error(pid, non_neg_integer | :infinity) ::
           {:ok, iodata} | :eof | {:error, String.t()} | :closed
   def read_error(server, timeout \\ :infinity) do
-    GenServer.call(server, :read_error, timeout)
+    GenStateMachine.call(server, :read_error, timeout)
   catch
     :exit, {:normal, _} -> :closed
   end
@@ -65,7 +65,7 @@ defmodule ExCmd.Process do
   """
   @spec write(pid, iodata, non_neg_integer | :infinity) :: :ok | {:error, String.t()} | :closed
   def write(server, data, timeout \\ :infinity) do
-    GenServer.call(server, {:write, data}, timeout)
+    GenStateMachine.call(server, {:write, data}, timeout)
   catch
     :exit, {:normal, _} -> :closed
   end
@@ -73,27 +73,28 @@ defmodule ExCmd.Process do
   @doc """
   Closes input stream. Which signal EOF to the program
   """
-  def close_stdin(server), do: GenServer.call(server, :close_stdin)
+  def close_stdin(server), do: GenStateMachine.call(server, :close_stdin)
 
   @doc """
   Kills the program
   """
-  def stop(server), do: GenServer.stop(server, :normal)
+  def stop(server), do: GenStateMachine.stop(server, :normal)
 
   @doc """
   Returns status of the process. It will be either of `:started`, `{:done, exit_status}`
   """
-  def status(server), do: GenServer.call(server, :status)
+  def status(server), do: GenStateMachine.call(server, :status)
 
   @doc """
   Waits for the program to terminate.
 
   If the program terminates before timeout, it returns `{:ok, exit_status}` else returns `:timeout`
   """
-  def await_exit(server, timeout \\ :infinity), do: GenServer.call(server, {:await_exit, timeout})
+  def await_exit(server, timeout \\ :infinity),
+    do: GenStateMachine.call(server, {:await_exit, timeout})
 
   @doc """
   Returns [port_info](http://erlang.org/doc/man/erlang.html#port_info-1)
   """
-  def port_info(server), do: GenServer.call(server, :port_info)
+  def port_info(server), do: GenStateMachine.call(server, :port_info)
 end
