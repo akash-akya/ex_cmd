@@ -2,8 +2,18 @@ defmodule ExCmd.ProcessServer do
   @moduledoc false
 
   require Logger
-  alias ExCmd.FIFO
   use GenStateMachine, callback_mode: :handle_event_function
+
+  defmacro send_input, do: 1
+  defmacro send_output, do: 2
+  defmacro output, do: 3
+  defmacro input, do: 4
+  defmacro close_input, do: 5
+  defmacro output_eof, do: 6
+
+  # TODO: guess maximum pipe buffer size based on OS. account for
+  # dynamic nature of pipe buffer size
+  @max_chunk_size 16_000
 
   def start_link([cmd | args], opts \\ %{}) do
     odu_path = :os.find_executable('odu')
@@ -33,36 +43,11 @@ defmodule ExCmd.ProcessServer do
   def handle_event(:internal, :setup, :init, params) do
     Process.flag(:trap_exit, true)
 
-    Temp.track!()
-    dir = Temp.mkdir!()
-
-    input_fifo_path =
-      unless params.opts[:no_stdin] do
-        path = Temp.path!(%{basedir: dir})
-        FIFO.create(path)
-        path
-      end
-
-    output_fifo_path = Temp.path!(%{basedir: dir})
-    FIFO.create(output_fifo_path)
-
-    error_fifo_path =
-      unless params.opts[:no_stderr] do
-        path = Temp.path!(%{basedir: dir})
-        FIFO.create(path)
-        path
-      end
-
     data = %{
-      input: nil,
-      output: nil,
-      error: nil,
-      fifo_paths: %{
-        input: input_fifo_path,
-        output: output_fifo_path,
-        error: error_fifo_path
-      },
       params: params,
+      pending_write: nil,
+      pending_read: nil,
+      input_ready: false,
       waiting_processes: MapSet.new()
     }
 
@@ -70,24 +55,12 @@ defmodule ExCmd.ProcessServer do
   end
 
   def handle_event({:call, from}, :run, :setup, data) do
-    paths = data.fifo_paths
-    port = start_odu_port(data.params, paths.input, paths.output, paths.error)
-
-    # ordering matters. see: func openIOFiles(...) in odu
-    input = open_fifo(paths.input, :write)
-    output = open_fifo(paths.output, :read)
-    error = open_fifo(paths.error, :read)
-
-    data =
-      Map.merge(data, %{port: port, state: :started, input: input, output: output, error: error})
-
+    port = start_odu_port(data.params)
+    data = Map.merge(data, %{port: port})
     actions = [{:reply, from, :ok}]
     {:next_state, :started, data, actions}
   end
 
-  # All blocking FIFO operations such as open, read, write etc, should
-  # be offloaded to specific fifo GenServer. ProcessServer must be
-  # non-blocking
   def handle_event({:call, from}, {:await_exit, timeout}, state, data) do
     case state do
       {:done, exit_status} ->
@@ -108,63 +81,24 @@ defmodule ExCmd.ProcessServer do
     {:keep_state_and_data, [{:reply, from, Port.info(data.port)}]}
   end
 
-  def handle_event({:call, from}, {:write, bin}, state, data) do
-    cond do
-      is_nil(data.fifo_paths.input) ->
-        {:keep_state_and_data, [{:reply, from, {:error, :unused_stream}}]}
+  def handle_event(:internal, :input_ready, _state, data) do
+    {data, actions} = try_sending_input(data)
+    {:keep_state, data, actions}
+  end
 
-      data.input == :closed || match?({:done, _}, state) ->
-        {:keep_state_and_data, [{:reply, from, {:error, :closed}}]}
-
-      true ->
-        FIFO.write(data.input, bin, from)
-        {:keep_state_and_data, []}
-    end
+  def handle_event({:call, from}, {:write, iodata}, _state, data) do
+    data = %{data | pending_write: {from, IO.iodata_to_binary(iodata)}}
+    {data, actions} = try_sending_input(data)
+    {:keep_state, data, actions}
   end
 
   def handle_event({:call, from}, :read, _, data) do
-    cond do
-      is_nil(data.fifo_paths.output) ->
-        {:keep_state_and_data, [{:reply, from, {:error, :unused_stream}}]}
-
-      data.output == :closed ->
-        {:keep_state_and_data, [{:reply, from, {:error, :closed}}]}
-
-      true ->
-        FIFO.read(data.output, from)
-        {:keep_state_and_data, []}
-    end
-  end
-
-  def handle_event({:call, from}, :read_error, _, data) do
-    cond do
-      is_nil(data.fifo_paths.error) ->
-        {:keep_state_and_data, [{:reply, from, {:error, :unused_stream}}]}
-
-      data.error == :closed ->
-        {:keep_state_and_data, [{:reply, from, {:error, :closed}}]}
-
-      true ->
-        FIFO.read(data.error, from)
-        {:keep_state_and_data, []}
-    end
+    {:keep_state, request_output(from, data), []}
   end
 
   def handle_event({:call, from}, :close_stdin, _, data) do
-    cond do
-      !data.fifo_paths[:input] ->
-        Logger.debug(fn -> "Can not close unused input stream" end)
-        {:keep_state_and_data, [{:reply, from, {:error, :unused_stream}}]}
-
-      data.input == :closed ->
-        {:keep_state_and_data, [{:reply, from, :ok}]}
-
-      true ->
-        # can not use :normal as a process might have pending write which
-        # can delay exit arbitrarily
-        Process.exit(data.input, :force_close)
-        {:keep_state, %{data | input: :closed}, [{:reply, from, :ok}]}
-    end
+    {data, actions} = close_stream(:stdin, from, data)
+    {:keep_state, data, actions}
   end
 
   def handle_event(:info, {:EXIT, _, reason}, _, data) do
@@ -186,32 +120,88 @@ defmodule ExCmd.ProcessServer do
     {:next_state, {:done, exit_status}, %{data | waiting_processes: MapSet.new()}, actions}
   end
 
+  def handle_event(:info, {port, {:data, output}}, _, %{port: port} = data) do
+    <<tag::16-integer-big-unsigned, bin::binary>> = output
+    {data, actions} = handle_command(tag, bin, data)
+    {:keep_state, data, actions}
+  end
+
   def handle_event({:timeout, {:await_exit, from}}, _, _, data) do
     {:keep_state, %{data | waiting_processes: MapSet.delete(data.waiting_processes, from)},
      [{:reply, from, :timeout}]}
   end
 
-  def open_fifo(nil, _mode), do: nil
-
-  def open_fifo(path, mode) do
-    {:ok, fifo} = GenServer.start_link(FIFO, %{path: path, mode: mode})
-    FIFO.open(fifo)
-    fifo
-  end
-
-  defp start_odu_port(params, input_path, output_path, error_path) do
+  defp start_odu_port(params) do
     args =
-      build_odu_params(params.opts, input_path, output_path, error_path) ++
+      build_odu_params(params.opts) ++
         ["--" | params.cmd_with_args]
 
     options = [:use_stdio, :exit_status, :binary, :hide, {:packet, 2}, args: args]
     Port.open({:spawn_executable, params.odu_path}, options)
   end
 
-  defp build_odu_params(opts, input_path, output_path, error_path) do
-    odu_config_params = ["-log", if(opts[:log], do: "|2", else: "")]
+  defp build_odu_params(opts) do
+    ["-log", if(opts[:log], do: "|2", else: "")]
+  end
 
-    odu_config_params ++
-      ["-stdin", input_path || "", "-stdout", output_path, "-stderr", error_path || ""]
+  defp handle_command(output_eof(), <<>>, data) do
+    pid = data.pending_read
+    actions = [{:reply, pid, :eof}]
+    data = %{data | pending_read: nil}
+    {data, actions}
+  end
+
+  defp handle_command(output(), bin, data) do
+    pid = data.pending_read
+    actions = [{:reply, pid, {:ok, bin}}]
+    data = %{data | pending_read: nil}
+    {data, actions}
+  end
+
+  defp handle_command(send_input(), <<>>, data) do
+    data = %{data | input_ready: true}
+    actions = [{:next_event, :internal, :input_ready}]
+    {data, actions}
+  end
+
+  defp try_sending_input(%{pending_write: {pid, bin}, input_ready: true} = data) do
+    {chunk, bin} = binary_split_at(bin, @max_chunk_size)
+    send_command(input(), chunk, data.port)
+
+    if bin == <<>> do
+      actions = [{:reply, pid, :ok}]
+      data = %{data | pending_write: nil, input_ready: false}
+      {data, actions}
+    else
+      data = %{data | pending_write: {pid, bin}, input_ready: false}
+      {data, []}
+    end
+  end
+
+  defp try_sending_input(data) do
+    {data, []}
+  end
+
+  defp request_output(from, data) do
+    send_command(send_output(), <<>>, data.port)
+    %{data | pending_read: from}
+  end
+
+  defp close_stream(:stdin, pid, data) do
+    send_command(close_input(), <<>>, data.port)
+    actions = [{:reply, pid, :ok}]
+    {data, actions}
+  end
+
+  defp send_command(tag, bin, port) do
+    bin = <<tag::16-integer-big-unsigned, bin::binary>>
+    Port.command(port, bin)
+  end
+
+  defp binary_split_at(bin, pos) when byte_size(bin) <= pos, do: {bin, <<>>}
+
+  defp binary_split_at(bin, pos) do
+    len = byte_size(bin)
+    {binary_part(bin, 0, pos), binary_part(bin, pos, len - pos)}
   end
 end

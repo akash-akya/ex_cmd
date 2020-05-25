@@ -8,7 +8,7 @@ defmodule ExCmd.Process do
   `ExCmd.stream!` should be preferred over this. Use this only if you need more control over the life-cycle of IO streams and OS process.
   """
 
-  @default [log: false, no_stdin: false, no_stderr: true]
+  @default [log: false, no_stderr: true]
 
   @doc """
   Starts `ExCmd.ProcessServer`
@@ -18,7 +18,6 @@ defmodule ExCmd.Process do
   `cmd_with_args` must be a list containing command with arguments. example: `["cat", "file.txt"]`.
 
   ### Options
-    * `no_stdin`       -  If set to true, User does not need to use collectable stream. ExCmd assumes that the command does not read input from stdin. Defaults to `false`
     * `no_stderr`      -  Whether to allow reading from stderr. Note that setting `true` but not reading from stderr might block external program due to back-pressure. Defaults to `true`
     * `log`            -  When set to `true` odu outputs are logged. Defaults to `false`
   """

@@ -95,11 +95,12 @@ defmodule ExCmd.ProcessTest do
   test "exit status" do
     {:ok, s} = Process.start_link(~w(odu -invalid))
     :ok = Process.run(s)
+    :eof = Process.read(s)
     :timer.sleep(500)
     assert {:done, 2} == Process.status(s)
   end
 
-  test "abnormal exit of fifo" do
+  test "invalid write" do
     Elixir.Process.flag(:trap_exit, true)
     {:ok, s} = Process.start_link(~w(cat))
     :ok = Process.run(s)
@@ -110,7 +111,7 @@ defmodule ExCmd.ProcessTest do
     assert Elixir.Process.alive?(s) == false
   end
 
-  test "explicite exit of fifo" do
+  test "if closing stdin exits the server" do
     {:ok, s} = Process.start_link(~w(cat))
     :ok = Process.run(s)
 
@@ -123,35 +124,26 @@ defmodule ExCmd.ProcessTest do
     {:ok, s} = Process.start_link(~w(cat))
     :ok = Process.run(s)
 
-    large_data = Stream.cycle(["test"]) |> Stream.take(100_000) |> Enum.to_list()
+    large_data = Stream.cycle(["test"]) |> Stream.take(1000_000) |> Enum.to_list()
     pid = Task.async(fn -> Process.write(s, large_data) end)
 
     :timer.sleep(200)
     Process.stop(s)
     :timer.sleep(100)
+    assert Elixir.Process.alive?(s) == false
 
     assert Task.await(pid) == :closed
   end
 
-  test "stderr" do
-    {:ok, s} = Process.start_link(~w(odu -invalid), no_stderr: false)
-    :ok = Process.run(s)
-    :timer.sleep(500)
+  # test "stderr" do
+  #   {:ok, s} = Process.start_link(~w(odu -invalid), no_stderr: false)
+  #   :ok = Process.run(s)
+  #   :timer.sleep(500)
 
-    assert {:ok, "flag provided but not defined: -invalid\n" <> _} = Process.read_error(s)
+  #   assert {:ok, "flag provided but not defined: -invalid\n" <> _} = Process.read_error(s)
 
-    assert {:done, 2} == Process.status(s)
-  end
-
-  test "no_stdin option" do
-    {:ok, s} = Process.start_link(~w(echo hello), no_stdin: true)
-    :ok = Process.run(s)
-    assert {:ok, "hello\n"} == Process.read(s)
-    assert :eof == Process.read(s)
-    # exit status from terminated command is async
-    :timer.sleep(100)
-    assert {:done, 0} == Process.status(s)
-  end
+  #   assert {:done, 2} == Process.status(s)
+  # end
 
   test "multiple await_exit" do
     {:ok, s} = Process.start_link(~w(cat))
@@ -165,6 +157,7 @@ defmodule ExCmd.ProcessTest do
       end
 
     Process.close_stdin(s)
+    :eof = Process.read(s)
 
     for task <- tasks do
       assert {:ok, 0} == Task.await(task)
