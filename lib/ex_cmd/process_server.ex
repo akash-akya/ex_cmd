@@ -11,9 +11,8 @@ defmodule ExCmd.ProcessServer do
   defmacro close_input, do: 5
   defmacro output_eof, do: 6
 
-  # TODO: guess maximum pipe buffer size based on OS. account for
-  # dynamic nature of pipe buffer size
-  @max_chunk_size 16_000
+  # 4 byte length prefix + 1 byte tag
+  @max_chunk_size 64 * 1024 - 5
 
   def start_link([cmd | args], opts \\ %{}) do
     odu_path = :os.find_executable('odu')
@@ -121,7 +120,7 @@ defmodule ExCmd.ProcessServer do
   end
 
   def handle_event(:info, {port, {:data, output}}, _, %{port: port} = data) do
-    <<tag::16-integer-big-unsigned, bin::binary>> = output
+    <<tag::unsigned-integer-8, bin::binary>> = output
     {data, actions} = handle_command(tag, bin, data)
     {:keep_state, data, actions}
   end
@@ -136,7 +135,7 @@ defmodule ExCmd.ProcessServer do
       build_odu_params(params.opts) ++
         ["--" | params.cmd_with_args]
 
-    options = [:use_stdio, :exit_status, :binary, :hide, {:packet, 2}, args: args]
+    options = [:use_stdio, :exit_status, :binary, :hide, {:packet, 4}, args: args]
     Port.open({:spawn_executable, params.odu_path}, options)
   end
 
@@ -194,7 +193,7 @@ defmodule ExCmd.ProcessServer do
   end
 
   defp send_command(tag, bin, port) do
-    bin = <<tag::16-integer-big-unsigned, bin::binary>>
+    bin = <<tag::unsigned-integer-8, bin::binary>>
     Port.command(port, bin)
   end
 
