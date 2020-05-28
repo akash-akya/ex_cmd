@@ -79,6 +79,11 @@ defmodule ExCmd.Process do
   def status(server), do: GenStateMachine.call(server, :status)
 
   @doc """
+  Returns os pid of the command
+  """
+  def os_pid(server), do: GenStateMachine.call(server, :os_pid)
+
+  @doc """
   Waits for the program to terminate.
 
   If the program terminates before timeout, it returns `{:ok, exit_status}` else returns `:timeout`

@@ -11,6 +11,7 @@ defmodule ExCmd.ProcessServer do
   defmacro close_input, do: 5
   defmacro output_eof, do: 6
   defmacro command_env, do: 7
+  defmacro os_pid, do: 8
 
   # 4 byte length prefix + 1 byte tag
   @max_chunk_size 64 * 1024 - 5
@@ -47,12 +48,23 @@ defmodule ExCmd.ProcessServer do
     port = start_odu_port(params.odu_path, params.cmd_with_args, odu_opts)
     send_env(params.opts[:env], port)
 
+    os_pid =
+      receive do
+        {^port, {:data, <<os_pid()::unsigned-integer-8, os_pid::big-unsigned-integer-32>>}} ->
+          Logger.debug("Command started. os pid: #{os_pid}")
+          os_pid
+      after
+        5_000 ->
+          raise "Failed to start command"
+      end
+
     data = %{
       pending_write: nil,
       pending_read: nil,
       input_ready: false,
       waiting_processes: MapSet.new(),
-      port: port
+      port: port,
+      os_pid: os_pid
     }
 
     {:next_state, :started, data, []}
@@ -72,6 +84,10 @@ defmodule ExCmd.ProcessServer do
 
   def handle_event({:call, from}, :status, state, _data) do
     {:keep_state_and_data, [{:reply, from, state}]}
+  end
+
+  def handle_event({:call, from}, :os_pid, _state, %{os_pid: os_pid}) do
+    {:keep_state_and_data, [{:reply, from, os_pid}]}
   end
 
   def handle_event({:call, from}, :port_info, state, data) when state not in [:init, :setup] do

@@ -58,9 +58,18 @@ defmodule ExCmd.ProcessTest do
            ] == get_events(logger)
   end
 
+  test "os pid" do
+    {:ok, s} = Process.start_link(~w(cat))
+    os_pid = Process.os_pid(s)
+
+    {outout, 0} = System.cmd("sh", ["-c", "ps -o args -p #{os_pid} | tail -1"])
+    assert System.find_executable("cat") == String.trim(outout)
+    Process.stop(s)
+  end
+
   test "external command kill" do
     {:ok, s} = Process.start_link(~w(cat))
-    os_pid = Process.port_info(s)[:os_pid]
+    os_pid = Process.os_pid(s)
     assert os_process_alive?(os_pid)
 
     Process.close_stdin(s)
@@ -75,7 +84,7 @@ defmodule ExCmd.ProcessTest do
     # cat command hangs waiting for EOF
     {:ok, s} = Process.start_link(~w(cat))
 
-    os_pid = Process.port_info(s)[:os_pid]
+    os_pid = Process.os_pid(s)
     assert os_process_alive?(os_pid)
 
     Process.stop(s)
