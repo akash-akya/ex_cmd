@@ -43,7 +43,8 @@ defmodule ExCmd.ProcessServer do
   def handle_event(:internal, :setup, :init, params) do
     Process.flag(:trap_exit, true)
 
-    port = start_odu_port(params.odu_path, params.cmd_with_args, params.opts[:log])
+    odu_opts = Keyword.take(params.opts, [:log, :cd])
+    port = start_odu_port(params.odu_path, params.cmd_with_args, odu_opts)
     send_env(params.opts[:env], port)
 
     data = %{
@@ -127,14 +128,21 @@ defmodule ExCmd.ProcessServer do
      [{:reply, from, :timeout}]}
   end
 
-  defp start_odu_port(odu_path, cmd_with_args, log) do
-    args = build_odu_params(log) ++ ["--" | cmd_with_args]
+  defp start_odu_port(odu_path, cmd_with_args, opts) do
+    args = build_odu_params(opts) ++ ["--" | cmd_with_args]
     options = [:use_stdio, :exit_status, :binary, :hide, {:packet, 4}, args: args]
     Port.open({:spawn_executable, odu_path}, options)
   end
 
-  defp build_odu_params(log) do
-    ["-log", if(log, do: "|2", else: "")]
+  defp build_odu_params(opts) do
+    log = if(opts[:log], do: "|2", else: "")
+    cd = Path.expand(opts[:cd] || File.cwd!())
+
+    if !File.exists?(cd) || !File.dir?(cd) do
+      raise ":cd is not a valid path"
+    end
+
+    ["-log", log, "-cd", cd]
   end
 
   defp handle_command(output_eof(), <<>>, data) do

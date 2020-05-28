@@ -16,6 +16,7 @@ defmodule ExCmd.Process do
   `cmd_with_args` must be a list containing command with arguments. example: `["cat", "file.txt"]`.
 
   ### Options
+    * `cd`             -  the directory to run the command in
     * `env`            -  an enumerable of tuples containing environment key-value. These can be accessed in the external program
     * `log`            -  When set to `true` odu outputs are logged. Defaults to `false`
   """

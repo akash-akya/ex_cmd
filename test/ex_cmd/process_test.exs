@@ -126,6 +126,16 @@ defmodule ExCmd.ProcessTest do
     assert Task.await(pid) == :closed
   end
 
+  test "cd" do
+    parent = Path.expand("..", File.cwd!())
+    {:ok, s} = Process.start_link(~w(sh -c pwd), cd: parent)
+    {:ok, dir} = Process.read(s)
+    :eof = Process.read(s)
+    assert String.trim(dir) == parent
+    assert {:ok, 0} = Process.await_exit(s)
+    Process.stop(s)
+  end
+
   test "env" do
     assert {:ok, s} = Process.start_link(~w(printenv TEST_ENV), env: %{"TEST_ENV" => "test"})
 
