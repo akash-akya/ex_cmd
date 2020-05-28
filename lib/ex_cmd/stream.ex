@@ -44,8 +44,6 @@ defmodule ExCmd.Stream do
         Keyword.merge(process_opts, no_stderr: true)
       )
 
-    :ok = Process.run(process)
-
     start_input_streamer(%Sink{process: process}, stream_opts[:input])
     %ExCmd.Stream{process: process, stream_opts: stream_opts}
   end

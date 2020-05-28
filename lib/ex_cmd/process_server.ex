@@ -10,6 +10,7 @@ defmodule ExCmd.ProcessServer do
   defmacro input, do: 4
   defmacro close_input, do: 5
   defmacro output_eof, do: 6
+  defmacro command_env, do: 7
 
   # 4 byte length prefix + 1 byte tag
   @max_chunk_size 64 * 1024 - 5
@@ -42,22 +43,18 @@ defmodule ExCmd.ProcessServer do
   def handle_event(:internal, :setup, :init, params) do
     Process.flag(:trap_exit, true)
 
+    port = start_odu_port(params.odu_path, params.cmd_with_args, params.opts[:log])
+    send_env(params.opts[:env], port)
+
     data = %{
-      params: params,
       pending_write: nil,
       pending_read: nil,
       input_ready: false,
-      waiting_processes: MapSet.new()
+      waiting_processes: MapSet.new(),
+      port: port
     }
 
-    {:next_state, :setup, data, []}
-  end
-
-  def handle_event({:call, from}, :run, :setup, data) do
-    port = start_odu_port(data.params)
-    data = Map.merge(data, %{port: port})
-    actions = [{:reply, from, :ok}]
-    {:next_state, :started, data, actions}
+    {:next_state, :started, data, []}
   end
 
   def handle_event({:call, from}, {:await_exit, timeout}, state, data) do
@@ -130,17 +127,14 @@ defmodule ExCmd.ProcessServer do
      [{:reply, from, :timeout}]}
   end
 
-  defp start_odu_port(params) do
-    args =
-      build_odu_params(params.opts) ++
-        ["--" | params.cmd_with_args]
-
+  defp start_odu_port(odu_path, cmd_with_args, log) do
+    args = build_odu_params(log) ++ ["--" | cmd_with_args]
     options = [:use_stdio, :exit_status, :binary, :hide, {:packet, 4}, args: args]
-    Port.open({:spawn_executable, params.odu_path}, options)
+    Port.open({:spawn_executable, odu_path}, options)
   end
 
-  defp build_odu_params(opts) do
-    ["-log", if(opts[:log], do: "|2", else: "")]
+  defp build_odu_params(log) do
+    ["-log", if(log, do: "|2", else: "")]
   end
 
   defp handle_command(output_eof(), <<>>, data) do
@@ -161,6 +155,43 @@ defmodule ExCmd.ProcessServer do
     data = %{data | input_ready: true}
     actions = [{:next_event, :internal, :input_ready}]
     {data, actions}
+  end
+
+  defp send_env(nil, port), do: send_env([], port)
+
+  defp send_env(env, port) do
+    payload =
+      Enum.map(env, fn {key, value} ->
+        entry = String.trim(key) <> "=" <> String.trim(value)
+
+        if byte_size(entry) > 65536 do
+          raise "Env entry length exceeds limit"
+        end
+
+        <<byte_size(entry)::big-unsigned-integer-16, entry::binary>>
+      end)
+      |> Enum.join()
+
+    send_command(command_env(), payload, port)
+  end
+
+  defp normalize_env(nil), do: []
+
+  defp normalize_env(env) do
+    user_env =
+      Map.new(env, fn {key, value} ->
+        {String.trim(key), String.trim(value)}
+      end)
+
+    # spawned process env will be beam env at that time + user env.
+    # this is similar to erlang behavior
+    env_list =
+      Map.merge(System.get_env(), user_env)
+      |> Enum.map(fn {k, v} ->
+        to_charlist(k <> "=" <> v)
+      end)
+
+    env_list
   end
 
   defp try_sending_input(%{pending_write: {pid, bin}, input_ready: true} = data) do

@@ -3,8 +3,6 @@ defmodule ExCmd.Process do
   Helper to interact with `ExCmd.ProcessServer`
 
   ## Overview
-  Each `ExCmd.ProcessServer` process maps to an instance of port (and an OS process). Internally `ExCmd.ProcessServer` creates and manages separate processes for each of the IO streams (Stdin, Stdout, Stderr) and a port that maps to an OS process of `odu`. Blocking operations such as `read` and `write` only blocks that stream, not the `ExCmd.Process` itself. For example, a blocking read does *not* block a parallel write.
-
   `ExCmd.stream!` should be preferred over this. Use this only if you need more control over the life-cycle of IO streams and OS process.
   """
 
@@ -13,23 +11,18 @@ defmodule ExCmd.Process do
   @doc """
   Starts `ExCmd.ProcessServer`
 
-  Starts a process using `cmd_with_args` and with options `opts`. start_link does not start the external program. It should be started with `run` explicitly.
+  Starts a process using `cmd_with_args` and with options `opts`
 
   `cmd_with_args` must be a list containing command with arguments. example: `["cat", "file.txt"]`.
 
   ### Options
-    * `no_stderr`      -  Whether to allow reading from stderr. Note that setting `true` but not reading from stderr might block external program due to back-pressure. Defaults to `true`
+    * `env`            -  an enumerable of tuples containing environment key-value. These can be accessed in the external program
     * `log`            -  When set to `true` odu outputs are logged. Defaults to `false`
   """
   def start_link(cmd_with_args, opts \\ []) do
     opts = Keyword.merge(@default, opts)
     ExCmd.ProcessServer.start_link(cmd_with_args, opts)
   end
-
-  @doc """
-  Opens the port and runs the program
-  """
-  def run(server), do: GenStateMachine.call(server, :run)
 
   @doc """
   Return bytes written by the program to output stream.
