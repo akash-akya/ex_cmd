@@ -107,7 +107,7 @@ defmodule ExCmd.ProcessTest do
     {:ok, s} = Process.start_link(~w(cat))
 
     large_data = Stream.cycle(["a"]) |> Stream.take(1_000_000) |> Enum.to_list()
-    pid = spawn_link(fn -> Process.write(s, large_data) end)
+    spawn_link(fn -> Process.write(s, large_data) end)
 
     :timer.sleep(20)
     :ok = Process.close_stdin(s)
