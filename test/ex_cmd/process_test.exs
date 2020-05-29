@@ -103,6 +103,36 @@ defmodule ExCmd.ProcessTest do
     assert {:done, 2} == Process.status(s)
   end
 
+  test "if large write blocks other commands" do
+    {:ok, s} = Process.start_link(~w(cat))
+
+    large_data = Stream.cycle(["a"]) |> Stream.take(1_000_000) |> Enum.to_list()
+    pid = spawn_link(fn -> Process.write(s, large_data) end)
+
+    :timer.sleep(20)
+    :ok = Process.close_stdin(s)
+
+    size =
+      Stream.unfold(nil, fn _ ->
+        case Process.read(s) do
+          {:ok, data} ->
+            :timer.sleep(10)
+            {byte_size(data), nil}
+
+          :eof ->
+            nil
+        end
+      end)
+      |> Enum.sum()
+
+    Process.stop(s)
+
+    assert size < 1_000_000
+
+    :timer.sleep(100)
+    assert Elixir.Process.alive?(s) == false
+  end
+
   test "invalid write" do
     Elixir.Process.flag(:trap_exit, true)
     {:ok, s} = Process.start_link(~w(cat))
