@@ -59,8 +59,8 @@ defmodule ExCmd.ProcessServer do
       end
 
     data = %{
-      pending_write: nil,
-      pending_read: nil,
+      pending_write: [],
+      pending_read: [],
       input_ready: false,
       waiting_processes: MapSet.new(),
       port: port,
@@ -99,38 +99,64 @@ defmodule ExCmd.ProcessServer do
     {:keep_state, data, actions}
   end
 
-  def handle_event({:call, from}, {:write, iodata}, _state, data) do
-    data = %{data | pending_write: {from, IO.iodata_to_binary(iodata)}}
+  def handle_event({:call, from}, {:write, iodata}, :started, data) do
+    bin = IO.iodata_to_binary(iodata)
+    data = %{data | pending_write: data.pending_write ++ [{from, bin}]}
     {data, actions} = try_sending_input(data)
     {:keep_state, data, actions}
   end
 
-  def handle_event({:call, from}, :read, _, data) do
+  def handle_event({:call, from}, {:write, iodata}, _state, _) do
+    {:keep_state_and_data, [{:reply, from, {:error, :epipe}}]}
+  end
+
+  def handle_event({:call, from}, :read, state, data) when state in [:started, :input_closed] do
     {:keep_state, request_output(from, data), []}
   end
 
-  def handle_event({:call, from}, :close_stdin, _, data) do
+  def handle_event({:call, from}, :read, _state, _) do
+    {:keep_state_and_data, [{:reply, from, :eof}]}
+  end
+
+  def handle_event({:call, from}, :close_stdin, :started, data) do
     {data, actions} = close_stream(:stdin, from, data)
-    {:keep_state, data, actions}
+    {data, write_actions} = handle_stdin_close(data)
+
+    {:next_state, :input_closed, data, actions ++ write_actions}
+  end
+
+  def handle_event({:call, from}, :close_stdin, _, data) do
+    {:keep_state_and_data, [{:reply, from, :ok}]}
+  end
+
+  def handle_event(:info, {:EXIT, port, reason}, state, %{port: port} = data) do
+    {data, write_actions} = handle_stdin_close(data)
+    {data, read_actions} = handle_eof(data)
+    {data, await_exit_actions} = reply_await_exit(data, {:error, :stopped})
+
+    if state in [:started, :input_closed] do
+      {:next_state, :port_closed, data, write_actions ++ read_actions ++ await_exit_actions}
+    else
+      {:keep_state, data, write_actions ++ read_actions ++ await_exit_actions}
+    end
   end
 
   def handle_event(:info, {:EXIT, _, reason}, _, data) do
-    if reason in [:normal, :force_close] do
-      {:keep_state_and_data, []}
-    else
-      {:stop, reason, data}
-    end
+    # {data, write_actions} = handle_stdin_close(data)
+    # {data, read_actions} = handle_eof(data)
+    # {data, await_exit_actions} = reply_await_exit(data, {:error, :stopped})
+    # actions = write_actions ++ read_actions ++ await_exit_actions
+    {:stop_and_reply, reason, [], data}
   end
 
   def handle_event(:info, {port, {:exit_status, exit_status}}, _, %{port: port} = data) do
     Logger.debug("command exited with status: #{exit_status}")
 
-    actions =
-      Enum.flat_map(data.waiting_processes, fn pid ->
-        [{:reply, pid, {:ok, exit_status}}, {{:timeout, {:await_exit, pid}}, :infinity, nil}]
-      end)
+    {data, write_actions} = handle_stdin_close(data)
+    {data, read_actions} = handle_eof(data)
+    {data, await_exit_actions} = reply_await_exit(data, {:ok, exit_status})
 
-    {:next_state, {:done, exit_status}, %{data | waiting_processes: MapSet.new()}, actions}
+    {:next_state, {:done, exit_status}, data, write_actions ++ read_actions ++ await_exit_actions}
   end
 
   def handle_event(:info, {port, {:data, output}}, _, %{port: port} = data) do
@@ -162,22 +188,20 @@ defmodule ExCmd.ProcessServer do
   end
 
   defp handle_command(output_eof(), <<>>, data) do
-    pid = data.pending_read
-    actions = [{:reply, pid, :eof}]
-    data = %{data | pending_read: nil}
-    {data, actions}
+    handle_eof(data)
   end
 
-  defp handle_command(output(), bin, data) do
-    pid = data.pending_read
+  defp handle_command(output(), bin, %{pending_read: [pid | pending]} = data) do
     actions = [{:reply, pid, {:ok, bin}}]
-    data = %{data | pending_read: nil}
+    data = %{data | pending_read: pending}
+
     {data, actions}
   end
 
   defp handle_command(send_input(), <<>>, data) do
     data = %{data | input_ready: true}
     actions = [{:next_event, :internal, :input_ready}]
+
     {data, actions}
   end
 
@@ -218,16 +242,43 @@ defmodule ExCmd.ProcessServer do
     env_list
   end
 
-  defp try_sending_input(%{pending_write: {pid, bin}, input_ready: true} = data) do
+  defp handle_stdin_close(data) do
+    actions =
+      Enum.flat_map(data.pending_write, fn {pid, _} ->
+        [{:reply, pid, {:error, :epipe}}]
+      end)
+
+    {%{data | pending_write: []}, actions}
+  end
+
+  defp handle_eof(data) do
+    actions =
+      Enum.flat_map(data.pending_read, fn pid ->
+        [{:reply, pid, :eof}]
+      end)
+
+    {%{data | pending_read: []}, actions}
+  end
+
+  defp reply_await_exit(data, response) do
+    actions =
+      Enum.flat_map(data.waiting_processes, fn pid ->
+        [{:reply, pid, response}, {{:timeout, {:await_exit, pid}}, :infinity, nil}]
+      end)
+
+    {%{data | waiting_processes: MapSet.new()}, actions}
+  end
+
+  defp try_sending_input(%{pending_write: [{pid, bin} | pending], input_ready: true} = data) do
     {chunk, bin} = binary_split_at(bin, @max_chunk_size)
     send_command(input(), chunk, data.port)
 
     if bin == <<>> do
       actions = [{:reply, pid, :ok}]
-      data = %{data | pending_write: nil, input_ready: false}
+      data = %{data | pending_write: pending, input_ready: false}
       {data, actions}
     else
-      data = %{data | pending_write: {pid, bin}, input_ready: false}
+      data = %{data | pending_write: [{pid, bin} | pending], input_ready: false}
       {data, []}
     end
   end
@@ -238,7 +289,7 @@ defmodule ExCmd.ProcessServer do
 
   defp request_output(from, data) do
     send_command(send_output(), <<>>, data.port)
-    %{data | pending_read: from}
+    %{data | pending_read: data.pending_read ++ [from]}
   end
 
   defp close_stream(:stdin, pid, data) do
@@ -258,4 +309,14 @@ defmodule ExCmd.ProcessServer do
     len = byte_size(bin)
     {binary_part(bin, 0, pos), binary_part(bin, pos, len - pos)}
   end
+
+  # defp enqueue_read(data, form, bin) do
+  #   %{data | pending_read: :queue.in({from, bin}, data.pending_read)}
+  # end
+
+  # defp dequeue_read(data) do
+  #   {{:value, {from, bin}}, pending_read} = :queue.out(data.pending_read)
+  #   data = %{data | pending_read: pending_write}
+  #   {from, bin, data}
+  # end
 end
