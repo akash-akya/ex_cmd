@@ -16,6 +16,7 @@ defmodule ExCmd.ProcessServer do
   # 4 byte length prefix + 1 byte tag
   @max_chunk_size 64 * 1024 - 5
 
+  # TODO: validate and return error tuple instead of raising error
   def start_link([cmd | args], opts \\ %{}) do
     odu_path = :os.find_executable('odu')
 
@@ -142,10 +143,6 @@ defmodule ExCmd.ProcessServer do
   end
 
   def handle_event(:info, {:EXIT, _, reason}, _, data) do
-    # {data, write_actions} = handle_stdin_close(data)
-    # {data, read_actions} = handle_eof(data)
-    # {data, await_exit_actions} = reply_await_exit(data, {:error, :stopped})
-    # actions = write_actions ++ read_actions ++ await_exit_actions
     {:stop_and_reply, reason, [], data}
   end
 
@@ -309,14 +306,4 @@ defmodule ExCmd.ProcessServer do
     len = byte_size(bin)
     {binary_part(bin, 0, pos), binary_part(bin, pos, len - pos)}
   end
-
-  # defp enqueue_read(data, form, bin) do
-  #   %{data | pending_read: :queue.in({from, bin}, data.pending_read)}
-  # end
-
-  # defp dequeue_read(data) do
-  #   {{:value, {from, bin}}, pending_read} = :queue.out(data.pending_read)
-  #   data = %{data | pending_read: pending_write}
-  #   {from, bin, data}
-  # end
 end
