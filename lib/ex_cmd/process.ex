@@ -49,8 +49,6 @@ defmodule ExCmd.Process do
           {:ok, iodata} | :eof | {:error, String.t()} | :closed
   def read(server, timeout \\ :infinity) do
     GenStateMachine.call(server, :read, timeout)
-  catch
-    :exit, {:normal, _} -> :closed
   end
 
   @doc """
@@ -62,8 +60,6 @@ defmodule ExCmd.Process do
           {:ok, iodata} | :eof | {:error, String.t()} | :closed
   def read_error(server, timeout \\ :infinity) do
     GenStateMachine.call(server, :read_error, timeout)
-  catch
-    :exit, {:normal, _} -> :closed
   end
 
   @doc """
@@ -74,8 +70,6 @@ defmodule ExCmd.Process do
   @spec write(pid, iodata, non_neg_integer | :infinity) :: :ok | {:error, String.t()} | :closed
   def write(server, data, timeout \\ :infinity) do
     GenStateMachine.call(server, {:write, data}, timeout)
-  catch
-    :exit, {:normal, _} -> :closed
   end
 
   @doc """
@@ -197,7 +191,7 @@ defmodule ExCmd.Process do
     {:keep_state, data, actions}
   end
 
-  def handle_event({:call, from}, {:write, iodata}, _state, _) do
+  def handle_event({:call, from}, {:write, _iodata}, _state, _) do
     {:keep_state_and_data, [{:reply, from, {:error, :epipe}}]}
   end
 
@@ -216,11 +210,11 @@ defmodule ExCmd.Process do
     {:next_state, :input_closed, data, actions ++ write_actions}
   end
 
-  def handle_event({:call, from}, :close_stdin, _, data) do
+  def handle_event({:call, from}, :close_stdin, _, _data) do
     {:keep_state_and_data, [{:reply, from, :ok}]}
   end
 
-  def handle_event(:info, {:EXIT, port, reason}, state, %{port: port} = data) do
+  def handle_event(:info, {:EXIT, port, _reason}, state, %{port: port} = data) do
     {data, write_actions} = handle_stdin_close(data)
     {data, read_actions} = handle_eof(data)
     {data, await_exit_actions} = reply_await_exit(data, {:error, :stopped})
@@ -280,7 +274,14 @@ defmodule ExCmd.Process do
 
   defp handle_command(output(), bin, %{pending_read: [pid | pending]} = data) do
     actions = [{:reply, pid, {:ok, bin}}]
-    data = %{data | pending_read: pending}
+
+    data =
+      if Enum.empty?(pending) do
+        %{data | pending_read: []}
+      else
+        send_command(send_output(), <<>>, data.port)
+        %{data | pending_read: pending}
+      end
 
     {data, actions}
   end
@@ -308,25 +309,6 @@ defmodule ExCmd.Process do
       |> Enum.join()
 
     send_command(command_env(), payload, port)
-  end
-
-  defp normalize_env(nil), do: []
-
-  defp normalize_env(env) do
-    user_env =
-      Map.new(env, fn {key, value} ->
-        {String.trim(key), String.trim(value)}
-      end)
-
-    # spawned process env will be beam env at that time + user env.
-    # this is similar to erlang behavior
-    env_list =
-      Map.merge(System.get_env(), user_env)
-      |> Enum.map(fn {k, v} ->
-        to_charlist(k <> "=" <> v)
-      end)
-
-    env_list
   end
 
   defp handle_stdin_close(data) do
@@ -374,8 +356,12 @@ defmodule ExCmd.Process do
     {data, []}
   end
 
-  defp request_output(from, data) do
+  defp request_output(from, %{pending_read: []} = data) do
     send_command(send_output(), <<>>, data.port)
+    %{data | pending_read: [from]}
+  end
+
+  defp request_output(from, data) do
     %{data | pending_read: data.pending_read ++ [from]}
   end
 

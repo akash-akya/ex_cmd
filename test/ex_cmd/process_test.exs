@@ -2,6 +2,11 @@ defmodule ExCmd.ProcessTest do
   use ExUnit.Case, async: true
   alias ExCmd.Process
 
+  @large_bin Stream.cycle(["a"])
+             |> Stream.take(1_000_000)
+             |> Enum.to_list()
+             |> IO.iodata_to_binary()
+
   test "read" do
     {:ok, s} = Process.start_link(~w(echo test))
     assert {:ok, "test\n"} == Process.read(s)
@@ -106,8 +111,7 @@ defmodule ExCmd.ProcessTest do
   test "if large write blocks other commands" do
     {:ok, s} = Process.start_link(~w(cat))
 
-    large_data = Stream.cycle(["a"]) |> Stream.take(1_000_000) |> Enum.to_list()
-    spawn_link(fn -> Process.write(s, large_data) end)
+    spawn_link(fn -> Process.write(s, @large_bin) end)
 
     :timer.sleep(20)
     :ok = Process.close_stdin(s)
@@ -127,10 +131,58 @@ defmodule ExCmd.ProcessTest do
 
     Process.stop(s)
 
-    assert size < 1_000_000
+    assert size < byte_size(@large_bin)
 
     :timer.sleep(100)
     assert Elixir.Process.alive?(s) == false
+  end
+
+  test "pending writes on stdin close" do
+    {:ok, s} = Process.start_link(~w(cat))
+    task1 = Task.async(fn -> Process.write(s, @large_bin) end)
+    task2 = Task.async(fn -> Process.write(s, "test") end)
+    Process.close_stdin(s)
+
+    assert Task.await(task1) == {:error, :epipe}
+    assert Task.await(task2) == {:error, :epipe}
+    Process.stop(s)
+  end
+
+  test "pending reads when program exits" do
+    {:ok, s} = Process.start_link(~w(cat))
+    task1 = Task.async(fn -> Process.read(s) end)
+    task2 = Task.async(fn -> Process.read(s) end)
+    :timer.sleep(200)
+    Process.close_stdin(s)
+
+    assert Process.read(s) == :eof
+    assert Task.await(task1) == :eof
+    assert Task.await(task2) == :eof
+    Process.stop(s)
+  end
+
+  test "pending write on port close" do
+    {:ok, s} = Process.start_link(~w(cat))
+    task = Task.async(fn -> Process.write(s, @large_bin) end)
+
+    :timer.sleep(200)
+    {:started, %{port: port}} = :sys.get_state(s)
+    Port.close(port)
+
+    assert Task.await(task) == {:error, :epipe}
+    Process.stop(s)
+  end
+
+  test "pending read on port close" do
+    {:ok, s} = Process.start_link(~w(cat))
+    task = Task.async(fn -> Process.read(s) end)
+
+    :timer.sleep(200)
+    {:started, %{port: port}} = :sys.get_state(s)
+    Port.close(port)
+
+    assert Task.await(task) == :eof
+    Process.stop(s)
   end
 
   test "invalid write" do
@@ -151,19 +203,17 @@ defmodule ExCmd.ProcessTest do
     assert Elixir.Process.alive?(s) == true
   end
 
-  test "process kill with parallel blocking write" do
-    {:ok, s} = Process.start_link(~w(cat))
+  # test "process kill with parallel blocking write" do
+  #   {:ok, s} = Process.start_link(~w(cat))
 
-    large_data = Stream.cycle(["test"]) |> Stream.take(1000_000) |> Enum.to_list()
-    pid = Task.async(fn -> Process.write(s, large_data) end)
+  #   pid = Task.async(fn -> Process.write(s, @large_bin) end)
 
-    :timer.sleep(200)
-    Process.stop(s)
-    :timer.sleep(100)
-    assert Elixir.Process.alive?(s) == false
-
-    assert Task.await(pid) == :closed
-  end
+  #   :timer.sleep(200)
+  #   os_pid = Process.os_pid(s)
+  #   {"", 0} = System.cmd("kill", ["-SIGKILL", to_string(os_pid)])
+  #   :timer.sleep(1000)
+  #   assert Task.await(pid) == :closed
+  # end
 
   test "cd" do
     parent = Path.expand("..", File.cwd!())
