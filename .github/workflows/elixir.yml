@@ -26,13 +26,13 @@ jobs:
         uses: Legion2/download-release-action@v2.1.0
         with:
           repository: akash-akya/odu
-          tag: 'v0.1.0'
+          tag: 'v0.2.0'
           path: tmp
-          file: odu_v0.1.0_linux_amd64.tar.gz
+          file: odu_v0.2.0_linux_amd64.tar.gz
       - name: Install odu
         run: |
           mkdir -p $GITHUB_WORKSPACE/bin
-          tar xvzf ./tmp/odu_v0.1.0_linux_amd64.tar.gz -C $GITHUB_WORKSPACE/bin
+          tar xvzf ./tmp/odu_v0.2.0_linux_amd64.tar.gz -C $GITHUB_WORKSPACE/bin
           chmod +x $GITHUB_WORKSPACE/bin/odu
           echo "::add-path::$GITHUB_WORKSPACE/bin"
       - name: Run Tests
