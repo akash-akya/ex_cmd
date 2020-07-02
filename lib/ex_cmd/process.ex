@@ -5,7 +5,7 @@ defmodule ExCmd.Process do
   `ExCmd.stream!` should be preferred over this. Use this only if you need more control over the life-cycle of IO streams and OS process.
   """
 
-  @default [log: false, no_stderr: true]
+  @default [log: false]
 
   @doc """
   Starts a process using `cmd_with_args` and with options `opts`
@@ -65,7 +65,7 @@ defmodule ExCmd.Process do
   @doc """
   Writes iodata `data` to programs input streams
 
-  This blocks when the fifo is full
+  This blocks when the pipe is full
   """
   @spec write(pid, iodata, non_neg_integer | :infinity) :: :ok | {:error, String.t()} | :closed
   def write(server, data, timeout \\ :infinity) do

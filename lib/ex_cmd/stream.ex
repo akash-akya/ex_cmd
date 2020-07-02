@@ -38,11 +38,7 @@ defmodule ExCmd.Stream do
     {stream_opts, process_opts} = Keyword.split(opts, [:exit_timeout, :chunk_size, :input])
     stream_opts = Keyword.merge(@default_opts, stream_opts)
 
-    {:ok, process} =
-      Process.start_link(
-        cmd_with_args,
-        Keyword.merge(process_opts, no_stderr: true)
-      )
+    {:ok, process} = Process.start_link(cmd_with_args, Keyword.merge(process_opts, []))
 
     start_input_streamer(%Sink{process: process}, stream_opts[:input])
     %ExCmd.Stream{process: process, stream_opts: stream_opts}
