@@ -117,6 +117,7 @@ defmodule ExCmd.Process do
   defmacro output_eof, do: 6
   defmacro command_env, do: 7
   defmacro os_pid, do: 8
+  defmacro start_error, do: 9
 
   # 4 byte length prefix + 1 byte tag
   @max_chunk_size 64 * 1024 - 5
@@ -138,6 +139,10 @@ defmodule ExCmd.Process do
         {^port, {:data, <<os_pid()::unsigned-integer-8, os_pid::big-unsigned-integer-32>>}} ->
           Logger.debug("Command started. os pid: #{os_pid}")
           os_pid
+
+        {^port, {:data, <<start_error()::unsigned-integer-8, reason::binary>>}} ->
+          Logger.error("Failed to start odu. reason: #{reason}")
+          raise "Failed to start odu"
       after
         5_000 ->
           raise "Failed to start command"
@@ -257,6 +262,7 @@ defmodule ExCmd.Process do
     Port.open({:spawn_executable, odu_path}, options)
   end
 
+  @odu_protocol_version "1.0"
   defp build_odu_params(opts) do
     log = if(opts[:log], do: "|2", else: "")
     cd = Path.expand(opts[:cd] || File.cwd!())
@@ -265,7 +271,7 @@ defmodule ExCmd.Process do
       raise ":cd is not a valid path"
     end
 
-    ["-log", log, "-cd", cd]
+    ["-log", log, "-cd", cd, "-protocol_version", @odu_protocol_version]
   end
 
   defp handle_command(output_eof(), <<>>, data) do
