@@ -30,7 +30,7 @@ Check [documentation](https://hexdocs.pm/ex_cmd/readme.html) for information
 
 ## Installation
 
-1. Install latest [odu](https://github.com/akash-akya/odu) v0.2.1 and make sure its in your path
+1. Install latest [odu](https://github.com/akash-akya/odu) v0.2.2 and make sure its in your path
 2. Install ExCmd
 ```elixir
 def deps do

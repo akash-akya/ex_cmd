@@ -15,7 +15,7 @@ defmodule ExCmd.Process do
   ### Options
     * `cd`             -  the directory to run the command in
     * `env`            -  an enumerable of tuples containing environment key-value. These can be accessed in the external program
-    * `log`            -  When set to `true` odu outputs are logged. Defaults to `false`
+    * `log`            -  When set to `true` odu logs and command stderr output are logged. Defaults to `false`
   """
   def start_link([cmd | args], opts \\ []) do
     opts = Keyword.merge(@default, opts)
@@ -49,17 +49,6 @@ defmodule ExCmd.Process do
           {:ok, iodata} | :eof | {:error, String.t()} | :closed
   def read(server, timeout \\ :infinity) do
     GenStateMachine.call(server, :read, timeout)
-  end
-
-  @doc """
-  Return bytes written by the program to error stream.
-
-  This blocks until the programs write and flush the output
-  """
-  @spec read_error(pid, non_neg_integer | :infinity) ::
-          {:ok, iodata} | :eof | {:error, String.t()} | :closed
-  def read_error(server, timeout \\ :infinity) do
-    GenStateMachine.call(server, :read_error, timeout)
   end
 
   @doc """
