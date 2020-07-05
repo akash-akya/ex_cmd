@@ -1,6 +1,6 @@
 defmodule ExCmd.Stream do
   @moduledoc """
-  Defines a `ExCmd.Stream` struct returned by `ExCmd.stream!/3`.
+  Defines a `ExCmd.Stream` struct returned by `ExCmd.stream!/2`.
   """
 
   alias ExCmd.Process
