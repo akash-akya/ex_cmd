@@ -27,7 +27,7 @@ defmodule ExCmd do
                            By defaults no input will be given to the command
     * `exit_timeout`     - Duration to wait for external program to exit after completion before raising an error. Defaults to `:infinity`
     * `chunk_size`       - Size of each iodata chunk emitted by Enumerable stream. When set to `nil` the output is unbuffered and chunk size will be variable. Defaults to 65336
-  All other options are passed to `ExCmd.Process.start_link/3` except `:no_stdin` which will be set based on `input` option and `:no_stderr` which will be always set to `false`][]
+  All other options are passed to `ExCmd.Process.start_link/3`
 
   ### Example
 

@@ -37,15 +37,8 @@ defmodule ExCmd.Stream do
   def __build__(cmd_with_args, opts) do
     {stream_opts, process_opts} = Keyword.split(opts, [:exit_timeout, :chunk_size, :input])
     stream_opts = Keyword.merge(@default_opts, stream_opts)
-    no_stdin = !stream_opts[:input]
 
-    {:ok, process} =
-      Process.start_link(
-        cmd_with_args,
-        Keyword.merge(process_opts, no_stdin: no_stdin, no_stderr: true)
-      )
-
-    :ok = Process.run(process)
+    {:ok, process} = Process.start_link(cmd_with_args, Keyword.merge(process_opts, []))
 
     start_input_streamer(%Sink{process: process}, stream_opts[:input])
     %ExCmd.Stream{process: process, stream_opts: stream_opts}
