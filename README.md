@@ -25,7 +25,7 @@ Check [documentation](https://hexdocs.pm/ex_cmd/readme.html) for information
 **Note: ExCmd is still WIP. Expect breaking changes**
 
 ## Installation
-1. Install [odu](https://github.com/akash-akya/odu/releases/tag/v0.2.2) v0.2.2 and make sure its in your path
+1. Install [odu](https://github.com/akash-akya/odu/releases/tag/v0.2.3) v0.2.3 and make sure its in your path
 2. Install ExCmd
 ```elixir
 def deps do
