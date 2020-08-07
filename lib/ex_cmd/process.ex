@@ -253,14 +253,19 @@ defmodule ExCmd.Process do
 
   @odu_protocol_version "1.0"
   defp build_odu_params(opts) do
-    log = if(opts[:log], do: "|2", else: "")
     cd = Path.expand(opts[:cd] || File.cwd!())
 
     if !File.exists?(cd) || !File.dir?(cd) do
       raise ":cd is not a valid path"
     end
 
-    ["-log", log, "-cd", cd, "-protocol_version", @odu_protocol_version]
+    params = ["-cd", cd, "-protocol_version", @odu_protocol_version]
+
+    if opts[:log] do
+      params ++ ["-log", "|2"]
+    else
+      params
+    end
   end
 
   defp handle_command(output_eof(), <<>>, data) do

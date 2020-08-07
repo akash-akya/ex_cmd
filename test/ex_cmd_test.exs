@@ -13,7 +13,7 @@ defmodule ExCmdTest do
 
   test "stream without stdin" do
     proc_stream = ExCmd.stream!(~w(echo hello))
-    output = proc_stream |> Enum.to_list()
-    assert output == ["hello\n"]
+    [output] = proc_stream |> Enum.to_list()
+    assert String.trim(output) == "hello"
   end
 end

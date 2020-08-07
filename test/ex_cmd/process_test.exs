@@ -9,7 +9,8 @@ defmodule ExCmd.ProcessTest do
 
   test "read" do
     {:ok, s} = Process.start_link(~w(echo test))
-    assert {:ok, "test\n"} == Process.read(s)
+    assert {:ok, output} = Process.read(s)
+    assert String.trim(output) == "test"
     assert :eof == Process.read(s)
     assert :ok == Process.close_stdin(s)
     # exit status from terminated command is async
@@ -64,12 +65,21 @@ defmodule ExCmd.ProcessTest do
   end
 
   test "os pid" do
-    {:ok, s} = Process.start_link(~w(cat))
-    os_pid = Process.os_pid(s)
+    if !windows?() do
+      {:ok, s} = Process.start_link(~w(cat))
+      os_pid = Process.os_pid(s)
 
-    {outout, 0} = System.cmd("sh", ["-c", "ps -o args -p #{os_pid} | tail -1"])
-    assert System.find_executable("cat") == String.trim(outout)
-    Process.stop(s)
+      {outout, 0} = System.cmd("sh", ["-c", "ps -o args -p #{os_pid} | tail -1"])
+      assert System.find_executable("cat") == String.trim(outout)
+      Process.stop(s)
+    else
+      {:ok, s} = Process.start_link(~w(cat))
+      os_pid = Process.os_pid(s)
+
+      {output, 0} = System.cmd("tasklist", ["/fi", "pid eq #{os_pid}"])
+      assert String.contains?(output, "cat.exe")
+      Process.stop(s)
+    end
   end
 
   test "external command kill" do
@@ -220,7 +230,7 @@ defmodule ExCmd.ProcessTest do
     {:ok, s} = Process.start_link(~w(sh -c pwd), cd: parent)
     {:ok, dir} = Process.read(s)
     :eof = Process.read(s)
-    assert String.trim(dir) == parent
+    assert String.trim(dir) |> Path.basename() == Path.basename(parent)
     assert {:ok, 0} = Process.await_exit(s)
     Process.stop(s)
   end
@@ -316,6 +326,15 @@ defmodule ExCmd.ProcessTest do
   end
 
   defp os_process_alive?(pid) do
-    match?({_, 0}, System.cmd("ps", ["-p", to_string(pid)]))
+    if windows?() do
+      case System.cmd("tasklist", ["/fi", "pid eq #{pid}"]) do
+        {"INFO: No tasks are running which match the specified criteria.\r\n", 0} -> false
+        {_, 0} -> true
+      end
+    else
+      match?({_, 0}, System.cmd("ps", ["-p", to_string(pid)]))
+    end
   end
+
+  defp windows?(), do: :os.type() == {:win32, :nt}
 end
