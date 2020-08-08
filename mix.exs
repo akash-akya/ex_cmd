@@ -44,7 +44,6 @@ defmodule ExCmd.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:temp, "~> 0.4"},
       {:gen_state_machine, "~> 2.0"},
       {:ex_doc, ">= 0.0.0", only: :dev}
     ]
