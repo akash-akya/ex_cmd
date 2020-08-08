@@ -1,39 +1,101 @@
 name: Elixir CI
-
 on: push
-
+env:
+  ODU_REF: refs/tags/v0.2.3
+  OTP_VERSION: 22.2
+  ELIXIR_VERSION: 1.9.4
 jobs:
-  test:
+  linux:
     runs-on: ubuntu-latest
-    name: OTP ${{matrix.otp}} / Elixir ${{matrix.elixir}}
+    name: Linux OTP ${{matrix.otp}} / Elixir ${{matrix.elixir}}
     strategy:
       matrix:
         otp: [21.0, 22.2]
         elixir: [1.7.0, 1.9.4]
     steps:
-      - uses: actions/checkout@v2
       - uses: actions/setup-elixir@v1
         with:
           otp-version: ${{matrix.otp}}
           elixir-version: ${{matrix.elixir}}
+      - name: Checkout odu
+        uses: actions/checkout@v2
+        with:
+          repository: akash-akya/odu
+          path: odu
+          ref: ${{env.ODU_REF}}
+      - name: Install golang
+        uses: actions/setup-go@v2
+      - name: Build and install odu
+        run: |
+          cd odu
+          go build
+          mkdir -p $HOME/bin
+          mv odu $HOME/bin
+          chmod +x $HOME/bin/odu
+          echo "::add-path::$HOME/bin"
+      - name: Checkout ex_cmd
+        uses: actions/checkout@v2
       - name: Install Dependencies
         run: mix deps.get
       - name: Compile
         run: mix compile --force --warnings-as-errors
       - name: Check format
         run: mix format --check-formatted
-      - name: Download odu
-        uses: Legion2/download-release-action@v2.1.0
+      - name: Run Tests
+        run: mix test
+  windows:
+    runs-on: windows-latest
+    name: Windows
+    steps:
+      - name: Cache erlang
+        uses: actions/cache@v2
+        id: erlang_cache
+        with:
+          path: C:\Program Files\erl10.6
+          key: erlang-${{ runner.os }}-${{ env.OTP_VERSION }}
+      - name: Download and install erlang
+        if: steps.erlang_cache.outputs.cache-hit != 'true'
+        run: |
+          Invoke-WebRequest "http://erlang.org/download/otp_win64_$env:OTP_VERSION.exe" -OutFile "C:\otp_win64_$env:OTP_VERSION.exe"
+          Start-Process -Wait "C:\otp_win64_$env:OTP_VERSION.exe" /S
+      - name: Add erlang to path
+        run: echo "##[add-path]C:\Program Files\erl10.6\bin"
+      - name: Cache Elixir
+        uses: actions/cache@v2
+        id: elixir_cache
+        with:
+          path: c:\elixir
+          key: elixir-${{ runner.os }}-${{ env.ELIXIR_VERSION }}
+      - name: Download and install Elixir
+        if: steps.elixir_cache.outputs.cache-hit != 'true'
+        run: |
+          Invoke-WebRequest "https://github.com/elixir-lang/elixir/releases/download/v$env:ELIXIR_VERSION/Precompiled.zip" -OutFile "C:\elixir_$env:ELIXIR_VERSION.zip"
+          Expand-Archive "C:\elixir_$env:ELIXIR_VERSION.zip" -DestinationPath c:\elixir
+      - name: Add elixir to path
+        run: echo "##[add-path]C:\elixir\bin"
+      - name: Checkout odu
+        uses: actions/checkout@v2
         with:
           repository: akash-akya/odu
-          tag: 'v0.2.2'
-          path: tmp
-          file: odu_v0.2.2_linux_amd64.tar.gz
-      - name: Install odu
+          path: odu
+          ref: ${{env.ODU_REF}}
+      - name: Install golang
+        uses: actions/setup-go@v2
+      - name: Build and install odu
         run: |
-          mkdir -p $GITHUB_WORKSPACE/bin
-          tar xvzf ./tmp/odu_v0.2.2_linux_amd64.tar.gz -C $GITHUB_WORKSPACE/bin
-          chmod +x $GITHUB_WORKSPACE/bin/odu
-          echo "::add-path::$GITHUB_WORKSPACE/bin"
+          cd odu
+          go build
+          cp odu.exe "$SYSTEMROOT\system32"
+        shell: bash
+      - name: Checkout ex_cmd
+        uses: actions/checkout@v2
+      - name: Install Dependencies
+        run: |
+          mix local.hex --force
+          mix.bat deps.get
+      - name: Compile
+        run: mix.bat compile --force --warnings-as-errors
+      # - name: Check format
+      #   run: mix.bat format --check-formatted
       - name: Run Tests
         run: mix test
