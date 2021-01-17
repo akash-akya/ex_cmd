@@ -5,6 +5,10 @@ defmodule ExCmd.Process do
   `ExCmd.stream!` should be preferred over this. Use this only if you need more control over the life-cycle of IO streams and OS process.
   """
 
+  defmodule Error do
+    defexception [:message]
+  end
+
   @default [log: false]
 
   @doc """
@@ -14,21 +18,26 @@ defmodule ExCmd.Process do
 
   ### Options
     * `cd`             -  the directory to run the command in
-    * `env`            -  an enumerable of tuples containing environment key-value. These can be accessed in the external program
+    * `env`            -  a list of tuples containing environment key-value. These can be accessed in the external program
     * `log`            -  When set to `true` odu logs and command stderr output are logged. Defaults to `false`
   """
+  @spec start_link(nonempty_list(String.t()),
+          cd: String.t(),
+          env: [{String.t(), String.t()}],
+          log: boolean()
+        ) :: {:ok, pid()} | {:error, any()}
   def start_link([cmd | args], opts \\ []) do
     opts = Keyword.merge(@default, opts)
     odu_path = :os.find_executable('odu')
 
     if !odu_path do
-      raise "'odu' executable not found"
+      raise Error, message: "'odu' executable not found"
     end
 
     cmd_path = :os.find_executable(to_charlist(cmd))
 
     if !cmd_path do
-      raise "'#{cmd}' executable not found"
+      raise Error, message: "'#{cmd}' executable not found"
     end
 
     GenStateMachine.start_link(__MODULE__, %{
@@ -64,6 +73,7 @@ defmodule ExCmd.Process do
   @doc """
   Closes input stream. Which signal EOF to the program
   """
+  @spec close_stdin(pid) :: :ok | {:error, any()}
   def close_stdin(server), do: GenStateMachine.call(server, :close_stdin)
 
   @doc """
@@ -74,11 +84,13 @@ defmodule ExCmd.Process do
   @doc """
   Returns status of the process. It will be either of `:started`, `{:done, exit_status}`
   """
+  @spec status(pid) :: :started | {:done, integer()}
   def status(server), do: GenStateMachine.call(server, :status)
 
   @doc """
   Returns os pid of the command
   """
+  @spec os_pid(pid) :: integer()
   def os_pid(server), do: GenStateMachine.call(server, :os_pid)
 
   @doc """
@@ -86,6 +98,7 @@ defmodule ExCmd.Process do
 
   If the program terminates before timeout, it returns `{:ok, exit_status}` else returns `:timeout`
   """
+  @spec await_exit(pid, timeout: timeout()) :: {:ok, integer()} | :timeout
   def await_exit(server, timeout \\ :infinity),
     do: GenStateMachine.call(server, {:await_exit, timeout})
 
@@ -98,14 +111,31 @@ defmodule ExCmd.Process do
   require Logger
   use GenStateMachine, callback_mode: :handle_event_function
 
+  @doc false
   defmacro send_input, do: 1
+
+  @doc false
   defmacro send_output, do: 2
+
+  @doc false
   defmacro output, do: 3
+
+  @doc false
   defmacro input, do: 4
+
+  @doc false
   defmacro close_input, do: 5
+
+  @doc false
   defmacro output_eof, do: 6
+
+  @doc false
   defmacro command_env, do: 7
+
+  @doc false
   defmacro os_pid, do: 8
+
+  @doc false
   defmacro start_error, do: 9
 
   # 4 byte length prefix + 1 byte tag
@@ -131,10 +161,10 @@ defmodule ExCmd.Process do
 
         {^port, {:data, <<start_error()::unsigned-integer-8, reason::binary>>}} ->
           Logger.error("Failed to start odu. reason: #{reason}")
-          raise "Failed to start odu"
+          raise Error, message: "Failed to start odu"
       after
         5_000 ->
-          raise "Failed to start command"
+          raise Error, message: "Failed to start command"
       end
 
     data = %{
@@ -256,7 +286,7 @@ defmodule ExCmd.Process do
     cd = Path.expand(opts[:cd] || File.cwd!())
 
     if !File.exists?(cd) || !File.dir?(cd) do
-      raise ":cd is not a valid path"
+      raise Error, message: ":cd is not a valid path"
     end
 
     params = ["-cd", cd, "-protocol_version", @odu_protocol_version]
@@ -301,7 +331,7 @@ defmodule ExCmd.Process do
         entry = String.trim(key) <> "=" <> String.trim(value)
 
         if byte_size(entry) > 65536 do
-          raise "Env entry length exceeds limit"
+          raise Error, message: "Env entry length exceeds limit"
         end
 
         <<byte_size(entry)::big-unsigned-integer-16, entry::binary>>
