@@ -10,8 +10,13 @@ jobs:
     name: Linux OTP ${{matrix.otp}} / Elixir ${{matrix.elixir}}
     strategy:
       matrix:
-        otp: [21.0, 22.2]
-        elixir: [1.7.0, 1.9.4]
+        include:
+          - elixir: 1.8.2
+            otp: 21.3
+          - elixir: 1.9.4
+            otp: 22.2
+          - elixir: 1.10.4
+            otp: 23.0
     steps:
       - uses: actions/setup-elixir@v1
         with:
@@ -32,7 +37,7 @@ jobs:
           mkdir -p $HOME/bin
           mv odu $HOME/bin
           chmod +x $HOME/bin/odu
-          echo "::add-path::$HOME/bin"
+          echo "$HOME/bin" >> $GITHUB_PATH
       - name: Checkout ex_cmd
         uses: actions/checkout@v2
       - name: Install Dependencies
@@ -59,7 +64,7 @@ jobs:
           Invoke-WebRequest "http://erlang.org/download/otp_win64_$env:OTP_VERSION.exe" -OutFile "C:\otp_win64_$env:OTP_VERSION.exe"
           Start-Process -Wait "C:\otp_win64_$env:OTP_VERSION.exe" /S
       - name: Add erlang to path
-        run: echo "##[add-path]C:\Program Files\erl10.6\bin"
+        run: echo "C:/Program Files/erl10.6/bin" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8
       - name: Cache Elixir
         uses: actions/cache@v2
         id: elixir_cache
@@ -72,7 +77,7 @@ jobs:
           Invoke-WebRequest "https://github.com/elixir-lang/elixir/releases/download/v$env:ELIXIR_VERSION/Precompiled.zip" -OutFile "C:\elixir_$env:ELIXIR_VERSION.zip"
           Expand-Archive "C:\elixir_$env:ELIXIR_VERSION.zip" -DestinationPath c:\elixir
       - name: Add elixir to path
-        run: echo "##[add-path]C:\elixir\bin"
+        run: echo "C:/elixir/bin" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8
       - name: Checkout odu
         uses: actions/checkout@v2
         with:
