@@ -8,6 +8,7 @@ defmodule ExCmd.MixProject do
       elixir: "~> 1.7",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
+      compilers: Mix.compilers() ++ [:odu],
 
       # Package
       package: package(),

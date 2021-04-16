@@ -37,3 +37,11 @@ def deps do
   ]
 end
 ```
+
+## Development
+
+To compile `odu`
+
+```elixir
+mix compile.odu
+```

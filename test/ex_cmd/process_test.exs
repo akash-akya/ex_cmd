@@ -112,7 +112,11 @@ defmodule ExCmd.ProcessTest do
   end
 
   test "exit status" do
-    {:ok, s} = Process.start_link(~w(odu -invalid))
+    odu_path =
+      Application.app_dir(:ex_cmd, "priv")
+      |> Path.join(Mix.Tasks.Compile.Odu.executable_name())
+
+    {:ok, s} = Process.start_link(~w(#{odu_path} -invalid))
     :eof = Process.read(s)
     :timer.sleep(500)
     assert {:done, 2} == Process.status(s)
