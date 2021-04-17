@@ -28,7 +28,7 @@ defmodule ExCmd.Process do
         ) :: {:ok, pid()} | {:error, any()}
   def start_link([cmd | args], opts \\ []) do
     opts = Keyword.merge(@default, opts)
-    odu_path = :os.find_executable('odu')
+    odu_path = odu_path()
 
     if !odu_path do
       raise Error, message: "'odu' executable not found"
@@ -411,5 +411,10 @@ defmodule ExCmd.Process do
   defp binary_split_at(bin, pos) do
     len = byte_size(bin)
     {binary_part(bin, 0, pos), binary_part(bin, pos, len - pos)}
+  end
+
+  defp odu_path do
+    Application.app_dir(:ex_cmd, "priv")
+    |> Path.join(Mix.Tasks.Compile.Odu.executable_name())
   end
 end

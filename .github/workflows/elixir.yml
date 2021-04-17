@@ -1,7 +1,6 @@
 name: Elixir CI
 on: push
 env:
-  ODU_REF: refs/tags/v0.2.3
   OTP_VERSION: 22.2
   ELIXIR_VERSION: 1.9.4
 jobs:
@@ -13,37 +12,22 @@ jobs:
         include:
           - elixir: 1.8.2
             otp: 21.3
-          - elixir: 1.9.4
-            otp: 22.2
           - elixir: 1.10.4
             otp: 23.0
     steps:
-      - uses: actions/setup-elixir@v1
+      - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{matrix.otp}}
           elixir-version: ${{matrix.elixir}}
-      - name: Checkout odu
-        uses: actions/checkout@v2
-        with:
-          repository: akash-akya/odu
-          path: odu
-          ref: ${{env.ODU_REF}}
       - name: Install golang
         uses: actions/setup-go@v2
-      - name: Build and install odu
-        run: |
-          cd odu
-          go build
-          mkdir -p $HOME/bin
-          mv odu $HOME/bin
-          chmod +x $HOME/bin/odu
-          echo "$HOME/bin" >> $GITHUB_PATH
       - name: Checkout ex_cmd
         uses: actions/checkout@v2
       - name: Install Dependencies
         run: mix deps.get
       - name: Compile
-        run: mix compile --force --warnings-as-errors
+        run: |
+          mix compile --force --warnings-as-errors
       - name: Check format
         run: mix format --check-formatted
       - name: Run Tests
@@ -78,20 +62,6 @@ jobs:
           Expand-Archive "C:\elixir_$env:ELIXIR_VERSION.zip" -DestinationPath c:\elixir
       - name: Add elixir to path
         run: echo "C:/elixir/bin" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8
-      - name: Checkout odu
-        uses: actions/checkout@v2
-        with:
-          repository: akash-akya/odu
-          path: odu
-          ref: ${{env.ODU_REF}}
-      - name: Install golang
-        uses: actions/setup-go@v2
-      - name: Build and install odu
-        run: |
-          cd odu
-          go build
-          cp odu.exe "$SYSTEMROOT\system32"
-        shell: bash
       - name: Checkout ex_cmd
         uses: actions/checkout@v2
       - name: Install Dependencies
@@ -99,7 +69,8 @@ jobs:
           mix local.hex --force
           mix.bat deps.get
       - name: Compile
-        run: mix.bat compile --force --warnings-as-errors
+        run: |
+          mix.bat compile --force --warnings-as-errors
       # - name: Check format
       #   run: mix.bat format --check-formatted
       - name: Run Tests
