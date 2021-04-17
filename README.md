@@ -17,31 +17,16 @@ ExCmd.stream!(~w(ffmpeg -i pipe:0 -f mp3 pipe:1), input: File.stream!("music_vid
 * Ability to close stdin and wait for output (with ports one can not selectively close stdin)
 * Stream abstraction
 
-## Overview
-
-ExCmd uses [odu](https://github.com/akash-akya/odu) middleware to interact with external process. It uses a demand-driven protocol for input and output to have back-pressure. There is stream abstraction `ExCmd.stream!` to simplify interaction with external process.
-
 Refer [documentation](https://hexdocs.pm/ex_cmd/readme.html) for information
 
 **Check out [Exile](https://github.com/akash-akya/exile) which is an alternative solution based on NIF without middleware overhead**
 
-**Note: ExCmd is still WIP. Expect breaking changes**
-
 ## Installation
-1. Install [odu](https://github.com/akash-akya/odu/releases/tag/v0.2.3) v0.2.3 and make sure its in your path
-2. Install ExCmd
+
 ```elixir
 def deps do
   [
     {:ex_cmd, "~> x.x.x"}
   ]
 end
-```
-
-## Development
-
-To compile `odu`
-
-```elixir
-mix compile.odu
 ```
