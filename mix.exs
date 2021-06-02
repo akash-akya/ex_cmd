@@ -38,6 +38,7 @@ defmodule ExCmd.MixProject do
     [
       maintainers: ["Akash Hiremath"],
       licenses: ["MIT"],
+      files: ~w(lib priv .formatter.exs mix.exs README* LICENSE* go_src),
       links: %{GitHub: "https://github.com/akash-akya/ex_cmd"}
     ]
   end
