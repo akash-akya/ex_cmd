@@ -51,7 +51,10 @@ defmodule ExCmd do
   @spec stream!(nonempty_list(String.t()),
           input: Enum.t() | collectable_func(),
           exit_timeout: timeout(),
-          chunk_size: pos_integer() | nil
+          chunk_size: pos_integer() | nil,
+          cd: String.t(),
+          env: [{String.t(), String.t()}],
+          log: boolean()
         ) :: ExCmd.Stream.t()
   def stream!(cmd_with_args, opts \\ []) do
     ExCmd.Stream.__build__(cmd_with_args, opts)
