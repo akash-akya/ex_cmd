@@ -1,8 +1,15 @@
-# ExCmd [![Hex.pm](https://img.shields.io/hexpm/v/ex_cmd.svg)](https://hex.pm/packages/ex_cmd)
+# ExCmd
 
-ExCmd is an Elixir library to run and communicate with external programs with back-pressure.
+[![CI](https://github.com/akash-akya/ex_cmd/actions/workflows/elixir.yml/badge.svg)](https://github.com/akash-akya/ex_cmd/actions/workflows/elixir.yml)
+[![Hex.pm](https://img.shields.io/hexpm/v/ex_cmd.svg)](https://hex.pm/packages/ex_cmd)
+[![docs](https://img.shields.io/badge/docs-hexpm-blue.svg)](https://hexdocs.pm/ex_cmd/)
 
-ExCmd is built around the idea of streaming data through an external program. Think streaming a video through `ffmpeg` to serve a web request. For example, getting audio out of a stream is as simple as
+
+ExCmd is an Elixir library to run and communicate with external programs with back-pressure mechanism. It makes use os provided stdio buffer for this.
+
+Communication with external program with [Port](https://hexdocs.pm/elixir/Port.html) is not demand driven. So it is easy to run into memory issues when the size of the data we are writing or reading from the external program is large. ExCmd tries to solve this problem by making better use of os provided stdio buffers and providing demand-driven interface to write and read from external program. It can be used to stream data through an external program. For example, streaming a video through `ffmpeg` to serve a web request.
+
+Getting audio out of a video stream is as simple as
 
 ``` elixir
 ExCmd.stream!(~w(ffmpeg -i pipe:0 -f mp3 pipe:1), input: File.stream!("music_video.mkv", [], 65336))
@@ -13,9 +20,9 @@ ExCmd.stream!(~w(ffmpeg -i pipe:0 -f mp3 pipe:1), input: File.stream!("music_vid
 ### Major advantages over port
 
 * Unlike beam ports, ExCmd puts back pressure on the external program
+* Stream abstraction
 * Proper program termination. No more zombie process
 * Ability to close stdin and wait for output (with ports one can not selectively close stdin)
-* Stream abstraction
 
 Refer [documentation](https://hexdocs.pm/ex_cmd/readme.html) for information
 
