@@ -34,8 +34,6 @@ defmodule ExCmd do
 
     * `exit_timeout` - Duration to wait for external program to exit after completion before raising an error. Defaults to `:infinity`
 
-    * `chunk_size` - Size of each iodata chunk emitted by Enumerable stream. When set to `nil` the output is unbuffered and chunk size will be variable. Defaults to 65336
-
   All other options are passed to `ExCmd.Process.start_link/2`
 
   ### Example
@@ -51,7 +49,6 @@ defmodule ExCmd do
   @spec stream!(nonempty_list(String.t()),
           input: Enum.t() | collectable_func(),
           exit_timeout: timeout(),
-          chunk_size: pos_integer() | nil,
           cd: String.t(),
           env: [{String.t(), String.t()}],
           log: boolean()
