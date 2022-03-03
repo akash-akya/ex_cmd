@@ -1,10 +1,13 @@
 defmodule ExCmd.MixProject do
   use Mix.Project
 
+  @version "0.6.0"
+  @scm_url "https://github.com/akash-akya/ex_cmd"
+
   def project do
     [
       app: :ex_cmd,
-      version: "0.5.1",
+      version: @version,
       elixir: "~> 1.7",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -15,11 +18,15 @@ defmodule ExCmd.MixProject do
       description: description(),
 
       # Docs
-      source_url: "https://github.com/akash-akya/ex_cmd",
-      homepage_url: "https://github.com/akash-akya/ex_cmd",
+      source_url: @scm_url,
+      homepage_url: @scm_url,
       docs: [
         main: "readme",
-        extras: ["README.md"]
+        source_ref: "v#{@version}",
+        extras: [
+          "README.md",
+          "LICENSE"
+        ]
       ]
     ]
   end
@@ -31,7 +38,7 @@ defmodule ExCmd.MixProject do
   end
 
   defp description do
-    "Interact with external programs with back-pressure"
+    "Interact with external programs with back-pressure mechanism"
   end
 
   defp package do
@@ -39,11 +46,10 @@ defmodule ExCmd.MixProject do
       maintainers: ["Akash Hiremath"],
       licenses: ["MIT"],
       files: ~w(lib priv .formatter.exs mix.exs README* LICENSE* go_src),
-      links: %{GitHub: "https://github.com/akash-akya/ex_cmd"}
+      links: %{GitHub: @scm_url}
     ]
   end
 
-  # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
       {:gen_state_machine, "~> 2.0"},
