@@ -17,12 +17,29 @@ ExCmd.stream!(~w(ffmpeg -i pipe:0 -f mp3 pipe:1), input: File.stream!("music_vid
 |> Stream.run()
 ```
 
-### Major advantages over port
+### Major Features
 
 * Unlike beam ports, ExCmd puts back pressure on the external program
 * Stream abstraction
+* No separate shim installation required
+* Ships pre-built binaries for MacOS, Windows, Linux
 * Proper program termination. No more zombie process
 * Ability to close stdin and wait for output (with ports one can not selectively close stdin)
+
+If you are not interested in streaming capability, ExCmd can still be useful because of the features listed above. For example running command and getting output as a string
+
+```elixir
+ExCmd.stream!(~w(curl ifconfig.co))
+|> Enum.into("")
+```
+
+If you want to use shell to handle more complex pipelines and globs, you can just spawn shell process and pass your shell command as the argument
+
+```elixir
+cmd = "echo 'foo baar' | base64"
+ExCmd.stream!(["sh", "-c", cmd])
+|> Enum.into("")
+```
 
 Refer [documentation](https://hexdocs.pm/ex_cmd/readme.html) for information
 
