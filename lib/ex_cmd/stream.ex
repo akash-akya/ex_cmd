@@ -4,6 +4,7 @@ defmodule ExCmd.Stream do
   """
 
   alias ExCmd.Process
+  alias ExCmd.Process.Error
 
   defmodule Sink do
     defstruct [:process]
@@ -79,7 +80,7 @@ defmodule ExCmd.Stream do
             {:halt, :normal}
 
           error ->
-            raise error
+            raise Error, "Failed to read data from the command. error: #{inspect(error)}"
         end
       end
 
@@ -90,11 +91,16 @@ defmodule ExCmd.Stream do
 
           result = Process.await_exit(process, stream_opts[:exit_timeout])
 
-          if exit_type == :normal_exit do
+          if exit_type == :normal do
             case result do
-              {:ok, 0} -> :ok
-              {:ok, status} -> raise "command exited with status: #{status}"
-              :timeout -> raise "command fail to exit within timeout: #{stream_opts.exit_timeout}"
+              {:ok, 0} ->
+                :ok
+
+              {:ok, status} ->
+                raise Error, "command exited with status: #{status}"
+
+              :timeout ->
+                raise Error, "command fail to exit within timeout: #{stream_opts.exit_timeout}"
             end
           end
         after

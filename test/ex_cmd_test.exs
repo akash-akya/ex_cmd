@@ -16,4 +16,12 @@ defmodule ExCmdTest do
     [output] = proc_stream |> Enum.to_list()
     assert String.trim(output) == "hello"
   end
+
+  test "when command fail with non-zero exit status" do
+    proc_stream = ExCmd.stream!(["sh", "-c", "exit 5"])
+
+    assert_raise ExCmd.Process.Error, "command exited with status: 5", fn ->
+      proc_stream |> Enum.to_list()
+    end
+  end
 end
