@@ -5,35 +5,33 @@ env:
   ELIXIR_VERSION: 1.9.4
 jobs:
   linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     name: Linux OTP ${{matrix.otp}} / Elixir ${{matrix.elixir}}
     strategy:
       matrix:
         include:
-          - elixir: 1.8.x
-            otp: 22.x
           - elixir: 1.10.x
+            otp: 23.x
+          - elixir: 1.11.x
             otp: 23.x
           - elixir: 1.12.x
             otp: 24.x
+          - elixir: 1.13.x
+            otp: 24.x
+          - elixir: 1.14.x
+            otp: 25.x
     steps:
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{matrix.otp}}
           elixir-version: ${{matrix.elixir}}
-      - name: Install golang
-        uses: actions/setup-go@v2
-      - name: Checkout ex_cmd
-        uses: actions/checkout@v2
-      - name: Install Dependencies
-        run: mix deps.get
-      - name: Compile
-        run: |
-          mix compile --force --warnings-as-errors
-      - name: Check format
-        run: mix format --check-formatted
-      - name: Run Tests
-        run: mix test
+      - uses: actions/setup-go@v2
+      - uses: actions/checkout@v3
+      - run: mix deps.get
+      - run: mix deps.unlock --check-unused
+      - run: mix format --check-formatted
+      - run: mix compile --force --warnings-as-errors
+      - run: mix test --trace
   windows:
     runs-on: windows-latest
     name: Windows
@@ -64,16 +62,8 @@ jobs:
           Expand-Archive "C:\elixir_$env:ELIXIR_VERSION.zip" -DestinationPath c:\elixir
       - name: Add elixir to path
         run: echo "C:/elixir/bin" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8
-      - name: Checkout ex_cmd
-        uses: actions/checkout@v2
-      - name: Install Dependencies
-        run: |
-          mix local.hex --force
-          mix.bat deps.get
-      - name: Compile
-        run: |
-          mix.bat compile --force --warnings-as-errors
-      # - name: Check format
-      #   run: mix.bat format --check-formatted
-      - name: Run Tests
-        run: mix test
+      - uses: actions/checkout@v2
+      - run: mix local.hex --force
+      - run: mix deps.get
+      - run: mix compile --force --warnings-as-errors
+      - run: mix test --trace
