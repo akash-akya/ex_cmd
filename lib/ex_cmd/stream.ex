@@ -58,7 +58,9 @@ defmodule ExCmd.Stream do
 
       Enumerable.impl_for(input) ->
         spawn_link(fn ->
-          Enum.into(input, sink)
+          input
+          |> Stream.into(sink)
+          |> Stream.run()
         end)
 
       true ->
