@@ -51,14 +51,14 @@ defmodule ExCmd.Stream do
       is_nil(input) ->
         :ok
 
-      !is_function(input) && Enumerable.impl_for(input) ->
-        spawn_link(fn ->
-          Enum.into(input, sink)
-        end)
-
       is_function(input, 1) ->
         spawn_link(fn ->
           input.(sink)
+        end)
+
+      Enumerable.impl_for(input) ->
+        spawn_link(fn ->
+          Enum.into(input, sink)
         end)
 
       true ->
