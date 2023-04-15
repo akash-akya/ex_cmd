@@ -7,9 +7,9 @@ defmodule ExCmd.StreamTest do
       |> Stream.map(&to_string/1)
       |> Stream.take(5)
 
-    assert ["12345"] =
+    assert "12345" =
              ExCmd.stream!(~w(cat), input: stream)
-             |> Enum.to_list()
+             |> Enum.into("")
   end
 
   test "resource stream input" do
@@ -23,8 +23,8 @@ defmodule ExCmd.StreamTest do
         fn _ -> nil end
       )
 
-    assert ["12345"] =
+    assert "12345" =
              ExCmd.stream!(~w(cat), input: stream)
-             |> Enum.to_list()
+             |> Enum.into("")
   end
 end
