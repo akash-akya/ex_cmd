@@ -36,35 +36,13 @@ jobs:
       - run: mix test --trace
 
   windows:
-    runs-on: windows-latest
+    runs-on: windows-2019
     name: Windows
     steps:
-      - name: Cache erlang
-        uses: actions/cache@v2
-        id: erlang_cache
+      - uses: erlef/setup-beam@v1
         with:
-          path: C:\Program Files\erl10.6
-          key: erlang-${{ runner.os }}-${{ env.OTP_VERSION }}
-      - name: Download and install erlang
-        if: steps.erlang_cache.outputs.cache-hit != 'true'
-        run: |
-          Invoke-WebRequest "http://erlang.org/download/otp_win64_$env:OTP_VERSION.exe" -OutFile "C:\otp_win64_$env:OTP_VERSION.exe"
-          Start-Process -Wait "C:\otp_win64_$env:OTP_VERSION.exe" /S
-      - name: Add erlang to path
-        run: echo "C:/Program Files/erl10.6/bin" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8
-      - name: Cache Elixir
-        uses: actions/cache@v2
-        id: elixir_cache
-        with:
-          path: c:\elixir
-          key: elixir-${{ runner.os }}-${{ env.ELIXIR_VERSION }}
-      - name: Download and install Elixir
-        if: steps.elixir_cache.outputs.cache-hit != 'true'
-        run: |
-          Invoke-WebRequest "https://github.com/elixir-lang/elixir/releases/download/v$env:ELIXIR_VERSION/elixir-otp-24.zip" -OutFile "C:\elixir_$env:ELIXIR_VERSION.zip"
-          Expand-Archive "C:\elixir_$env:ELIXIR_VERSION.zip" -DestinationPath c:\elixir
-      - name: Add elixir to path
-        run: echo "C:/elixir/bin" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8
+          otp-version: "25"
+          elixir-version: "1.14"
       - uses: actions/checkout@v2
       - run: mix local.hex --force
       - run: mix deps.get
