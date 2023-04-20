@@ -52,7 +52,7 @@ defmodule ExCmd.MixProject do
 
   defp deps do
     [
-      {:gen_state_machine, "~> 2.0"},
+      {:gen_state_machine, "~> 3.0"},
 
       # development & test
       {:credo, "~> 1.6", only: [:dev, :test], runtime: false},
