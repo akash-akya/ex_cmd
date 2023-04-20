@@ -29,22 +29,65 @@ jobs:
           elixir-version: ${{matrix.elixir}}
       - uses: actions/setup-go@v2
       - uses: actions/checkout@v3
+
+      - name: Cache Dependencies
+        id: mix-cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            deps
+            _build
+            priv/plts
+          key: ${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('mix.lock') }}
+
+      - name: Install Dependencies
+        if: steps.mix-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p priv/plts
+          mix deps.get
+          mix deps.compile
+          mix dialyzer --plt
+
       - run: mix deps.get
       - run: mix deps.unlock --check-unused
       - run: mix format --check-formatted
-      - run: mix compile --force --warnings-as-errors
+      - run: mix compile --warnings-as-errors
       - run: mix test --trace
+      - run: mix credo --strict
+      - run: mix dialyzer --plt
 
   windows:
     runs-on: windows-2019
-    name: Windows
+    name: Windows OTP ${{matrix.otp}} / Elixir ${{matrix.elixir}}
+    strategy:
+      matrix:
+        include:
+          - elixir: "1.14"
+            otp: "25"
     steps:
       - uses: erlef/setup-beam@v1
         with:
-          otp-version: "25"
-          elixir-version: "1.14"
+          otp-version: ${{matrix.otp}}
+          elixir-version: ${{matrix.elixir}}
       - uses: actions/checkout@v2
-      - run: mix local.hex --force
+
+      - name: Cache Dependencies
+        id: mix-cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            deps
+            _build
+            priv/plts
+          key: ${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('mix.lock') }}
+
+      - name: Install Dependencies
+        if: steps.mix-cache.outputs.cache-hit != 'true'
+        run: |
+          mix deps.get
+          mix deps.compile
+
       - run: mix deps.get
-      - run: mix compile --force --warnings-as-errors
+      - run: mix deps.unlock --check-unused
+      - run: mix compile --warnings-as-errors
       - run: mix test --trace
