@@ -1,8 +1,10 @@
-name: Elixir CI
-on: push
+name: CI
+on:
+  - push
+  - pull_request
 env:
-  OTP_VERSION: 22.2
-  ELIXIR_VERSION: 1.9.4
+  OTP_VERSION: "24.0"
+  ELIXIR_VERSION: "1.14.0"
 jobs:
   linux:
     runs-on: ubuntu-20.04
@@ -32,6 +34,7 @@ jobs:
       - run: mix format --check-formatted
       - run: mix compile --force --warnings-as-errors
       - run: mix test --trace
+
   windows:
     runs-on: windows-latest
     name: Windows
@@ -58,7 +61,7 @@ jobs:
       - name: Download and install Elixir
         if: steps.elixir_cache.outputs.cache-hit != 'true'
         run: |
-          Invoke-WebRequest "https://github.com/elixir-lang/elixir/releases/download/v$env:ELIXIR_VERSION/Precompiled.zip" -OutFile "C:\elixir_$env:ELIXIR_VERSION.zip"
+          Invoke-WebRequest "https://github.com/elixir-lang/elixir/releases/download/v$env:ELIXIR_VERSION/elixir-otp-24.zip" -OutFile "C:\elixir_$env:ELIXIR_VERSION.zip"
           Expand-Archive "C:\elixir_$env:ELIXIR_VERSION.zip" -DestinationPath c:\elixir
       - name: Add elixir to path
         run: echo "C:/elixir/bin" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8
