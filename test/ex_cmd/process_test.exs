@@ -1,6 +1,8 @@
 defmodule ExCmd.ProcessTest do
   use ExUnit.Case, async: true
+
   alias ExCmd.Process
+  alias Mix.Tasks.Compile.Odu
 
   @large_bin Stream.cycle(["a"])
              |> Stream.take(1_000_000)
@@ -65,19 +67,19 @@ defmodule ExCmd.ProcessTest do
   end
 
   test "os pid" do
-    if !windows?() do
-      {:ok, s} = Process.start_link(~w(cat))
-      os_pid = Process.os_pid(s)
-
-      {outout, 0} = System.cmd("sh", ["-c", "ps -o args -p #{os_pid} | tail -1"])
-      assert System.find_executable("cat") == String.trim(outout)
-      Process.stop(s)
-    else
+    if windows?() do
       {:ok, s} = Process.start_link(~w(cat))
       os_pid = Process.os_pid(s)
 
       {output, 0} = System.cmd("tasklist", ["/fi", "pid eq #{os_pid}"])
       assert String.contains?(output, "cat.exe")
+      Process.stop(s)
+    else
+      {:ok, s} = Process.start_link(~w(cat))
+      os_pid = Process.os_pid(s)
+
+      {outout, 0} = System.cmd("sh", ["-c", "ps -o args -p #{os_pid} | tail -1"])
+      assert System.find_executable("cat") == String.trim(outout)
       Process.stop(s)
     end
   end
@@ -104,8 +106,6 @@ defmodule ExCmd.ProcessTest do
 
     Process.stop(s)
 
-    # odu waits for 3s before killing the command
-    # TODO: make this timeout configurable
     :timer.sleep(4000)
 
     refute os_process_alive?(os_pid)
@@ -114,7 +114,7 @@ defmodule ExCmd.ProcessTest do
   test "exit status" do
     odu_path =
       Application.app_dir(:ex_cmd, "priv")
-      |> Path.join(Mix.Tasks.Compile.Odu.executable_name())
+      |> Path.join(Odu.executable_name())
 
     {:ok, s} = Process.start_link(~w(#{odu_path} -invalid))
     :eof = Process.read(s)
@@ -340,5 +340,5 @@ defmodule ExCmd.ProcessTest do
     end
   end
 
-  defp windows?(), do: :os.type() == {:win32, :nt}
+  defp windows?, do: :os.type() == {:win32, :nt}
 end
