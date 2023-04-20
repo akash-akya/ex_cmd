@@ -56,6 +56,19 @@ jobs:
       - run: mix credo --strict
       - run: mix dialyzer --plt
 
+  macos:
+    runs-on: macos-11
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Erlang & Elixir
+        run: |
+          brew install erlang elixir
+          mix local.hex --force
+          mix local.rebar --force
+      - run: |
+          mix deps.get
+          MIX_ENV=test mix test --trace
+
   windows:
     runs-on: windows-2019
     name: Windows OTP ${{matrix.otp}} / Elixir ${{matrix.elixir}}
