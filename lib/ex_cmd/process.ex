@@ -32,7 +32,7 @@ defmodule ExCmd.Process do
     opts = Keyword.merge(@default, opts)
     odu_path = odu_path()
 
-    if !odu_path do
+    if !File.exists?(odu_path) do
       raise Error, message: "'odu' executable not found"
     end
 
@@ -100,9 +100,10 @@ defmodule ExCmd.Process do
 
   If the program terminates before timeout, it returns `{:ok, exit_status}` else returns `:timeout`
   """
-  @spec await_exit(pid, timeout: timeout()) :: {:ok, integer()} | :timeout
-  def await_exit(server, timeout \\ :infinity),
-    do: GenStateMachine.call(server, {:await_exit, timeout})
+  @spec await_exit(pid, timeout()) :: {:ok, integer()} | :timeout
+  def await_exit(server, timeout \\ :infinity) do
+    GenStateMachine.call(server, {:await_exit, timeout})
+  end
 
   @doc """
   Returns [port_info](http://erlang.org/doc/man/erlang.html#port_info-1)

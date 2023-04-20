@@ -13,6 +13,9 @@ defmodule ExCmd.MixProject do
       deps: deps(),
       compilers: Mix.compilers() ++ [:odu],
 
+      # Ensure dialyzer sees mix modules
+      dialyzer: [plt_add_apps: [:mix]],
+
       # Package
       package: package(),
       description: description(),
