@@ -7,6 +7,7 @@ defmodule ExCmd.Stream do
   alias ExCmd.Process.Error
 
   defmodule Sink do
+    @moduledoc false
     defstruct [:process]
 
     defimpl Collectable do

@@ -11,6 +11,8 @@ defmodule ExCmd.Process do
 
   @default [log: false]
 
+  alias Mix.Tasks.Compile.Odu
+
   @doc """
   Starts a process using `cmd_with_args` and with options `opts`
 
@@ -30,7 +32,7 @@ defmodule ExCmd.Process do
     opts = Keyword.merge(@default, opts)
     odu_path = odu_path()
 
-    if !odu_path do
+    if !File.exists?(odu_path) do
       raise Error, message: "'odu' executable not found"
     end
 
@@ -98,9 +100,10 @@ defmodule ExCmd.Process do
 
   If the program terminates before timeout, it returns `{:ok, exit_status}` else returns `:timeout`
   """
-  @spec await_exit(pid, timeout: timeout()) :: {:ok, integer()} | :timeout
-  def await_exit(server, timeout \\ :infinity),
-    do: GenStateMachine.call(server, {:await_exit, timeout})
+  @spec await_exit(pid, timeout()) :: {:ok, integer()} | :timeout
+  def await_exit(server, timeout \\ :infinity) do
+    GenStateMachine.call(server, {:await_exit, timeout})
+  end
 
   @doc """
   Returns [port_info](http://erlang.org/doc/man/erlang.html#port_info-1)
@@ -327,16 +330,15 @@ defmodule ExCmd.Process do
 
   defp send_env(env, port) do
     payload =
-      Enum.map(env, fn {key, value} ->
+      Enum.map_join(env, fn {key, value} ->
         entry = String.trim(key) <> "=" <> String.trim(value)
 
-        if byte_size(entry) > 65536 do
+        if byte_size(entry) > 65_536 do
           raise Error, message: "Env entry length exceeds limit"
         end
 
         <<byte_size(entry)::big-unsigned-integer-16, entry::binary>>
       end)
-      |> Enum.join()
 
     send_command(command_env(), payload, port)
   end
@@ -415,6 +417,6 @@ defmodule ExCmd.Process do
 
   defp odu_path do
     Application.app_dir(:ex_cmd, "priv")
-    |> Path.join(Mix.Tasks.Compile.Odu.executable_name())
+    |> Path.join(Odu.executable_name())
   end
 end

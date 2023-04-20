@@ -1,8 +1,10 @@
-name: Elixir CI
-on: push
+name: CI
+on:
+  - push
+  - pull_request
 env:
-  OTP_VERSION: 22.2
-  ELIXIR_VERSION: 1.9.4
+  OTP_VERSION: "24.0"
+  ELIXIR_VERSION: "1.14.0"
 jobs:
   linux:
     runs-on: ubuntu-20.04
@@ -27,43 +29,65 @@ jobs:
           elixir-version: ${{matrix.elixir}}
       - uses: actions/setup-go@v2
       - uses: actions/checkout@v3
+
+      - name: Cache Dependencies
+        id: mix-cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            deps
+            _build
+            priv/plts
+          key: ${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('mix.lock') }}
+
+      - name: Install Dependencies
+        if: steps.mix-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p priv/plts
+          mix deps.get
+          mix deps.compile
+          mix dialyzer --plt
+
       - run: mix deps.get
       - run: mix deps.unlock --check-unused
       - run: mix format --check-formatted
-      - run: mix compile --force --warnings-as-errors
+      - run: mix compile --warnings-as-errors
       - run: mix test --trace
+      - run: mix credo --strict
+      - run: mix dialyzer --plt
+
   windows:
-    runs-on: windows-latest
-    name: Windows
+    runs-on: windows-2019
+    name: Windows OTP ${{matrix.otp}} / Elixir ${{matrix.elixir}}
+    strategy:
+      matrix:
+        include:
+          - elixir: "1.14"
+            otp: "25"
     steps:
-      - name: Cache erlang
-        uses: actions/cache@v2
-        id: erlang_cache
+      - uses: erlef/setup-beam@v1
         with:
-          path: C:\Program Files\erl10.6
-          key: erlang-${{ runner.os }}-${{ env.OTP_VERSION }}
-      - name: Download and install erlang
-        if: steps.erlang_cache.outputs.cache-hit != 'true'
-        run: |
-          Invoke-WebRequest "http://erlang.org/download/otp_win64_$env:OTP_VERSION.exe" -OutFile "C:\otp_win64_$env:OTP_VERSION.exe"
-          Start-Process -Wait "C:\otp_win64_$env:OTP_VERSION.exe" /S
-      - name: Add erlang to path
-        run: echo "C:/Program Files/erl10.6/bin" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8
-      - name: Cache Elixir
-        uses: actions/cache@v2
-        id: elixir_cache
-        with:
-          path: c:\elixir
-          key: elixir-${{ runner.os }}-${{ env.ELIXIR_VERSION }}
-      - name: Download and install Elixir
-        if: steps.elixir_cache.outputs.cache-hit != 'true'
-        run: |
-          Invoke-WebRequest "https://github.com/elixir-lang/elixir/releases/download/v$env:ELIXIR_VERSION/Precompiled.zip" -OutFile "C:\elixir_$env:ELIXIR_VERSION.zip"
-          Expand-Archive "C:\elixir_$env:ELIXIR_VERSION.zip" -DestinationPath c:\elixir
-      - name: Add elixir to path
-        run: echo "C:/elixir/bin" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8
+          otp-version: ${{matrix.otp}}
+          elixir-version: ${{matrix.elixir}}
       - uses: actions/checkout@v2
-      - run: mix local.hex --force
+
+      - name: Cache Dependencies
+        id: mix-cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            deps
+            _build
+            priv/plts
+          key: ${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('mix.lock') }}
+
+      - name: Install Dependencies
+        if: steps.mix-cache.outputs.cache-hit != 'true'
+        run: |
+          mix deps.get
+          mix deps.compile
+
       - run: mix deps.get
-      - run: mix compile --force --warnings-as-errors
+      - run: mix deps.unlock --check-unused
+      - run: mix compile --warnings-as-errors
       - run: mix test --trace
