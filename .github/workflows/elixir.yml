@@ -27,7 +27,6 @@ jobs:
         with:
           otp-version: ${{matrix.otp}}
           elixir-version: ${{matrix.elixir}}
-      - uses: actions/setup-go@v2
       - uses: actions/checkout@v3
 
       - name: Cache Dependencies
@@ -55,6 +54,18 @@ jobs:
       - run: mix test --trace
       - run: mix credo --strict
       - run: mix dialyzer --plt
+
+  macos:
+    runs-on: macos-11
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Erlang & Elixir
+        run: |
+          brew install erlang elixir
+          mix local.hex --force
+          mix local.rebar --force
+      - run: mix deps.get
+      - run: mix test --trace
 
   windows:
     runs-on: windows-2019

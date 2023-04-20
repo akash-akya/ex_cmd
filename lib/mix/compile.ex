@@ -6,28 +6,24 @@ defmodule Mix.Tasks.Compile.Odu do
   @system_arch List.to_string(:erlang.system_info(:system_architecture))
 
   @impl Mix.Task.Compiler
-  def run(args) do
-    {opts, _, errors} = OptionParser.parse(args, switches: [os: :string, arch: :string])
+  def run(_args) do
+    {os, arch} = platform_from_env()
 
-    case {opts[:os], opts[:arch], errors} do
-      {os, arch, []} when is_binary(os) and is_binary(arch) ->
+    case {os, arch} do
+      {os, arch} when is_binary(os) and is_binary(arch) ->
         build_odu(executable_path({os, arch}), [{"GOOS", os}, {"GOARCH", arch}])
 
-      {nil, nil, []} ->
+      {nil, nil} ->
         build_for_current_platform()
-
-      _ ->
-        compiler_error("""
-        Invalid compile options. To build shim for different platform - pass `--os <string>` and `--arch <string>`
-        options. Skip these options to build shim for current platform.
-        """)
     end
   end
 
   def executable_name(platform \\ current_platform()) do
     case platform do
       {"windows", "amd64"} -> "odu_windows_amd64.exe"
+      {"windows", "arm64"} -> "odu_windows_arm64.exe"
       {"linux", "amd64"} -> "odu_linux_amd64"
+      {"linux", "arm64"} -> "odu_linux_arm64"
       {"darwin", "amd64"} -> "odu_darwin_amd64"
       {"darwin", "arm64"} -> "odu_darwin_arm64"
       # generic name for all other platform
@@ -96,45 +92,95 @@ defmodule Mix.Tasks.Compile.Odu do
   end
 
   defp current_platform do
-    {osfamily, osname} = :os.type()
-    arch = system_arch(osfamily)
-
-    case {osfamily, osname, arch} do
-      {:win32, _, "amd64"} ->
-        {"windows", "amd64"}
-
-      {:unix, :linux, "amd64"} ->
+    case current_target(:os.type()) do
+      {:ok, {"x86_64", "linux", _}} ->
         {"linux", "amd64"}
 
-      {:unix, :darwin, "amd64"} ->
+      {:ok, {"aarch64", "linux", _}} ->
+        {"linux", "arm64"}
+
+      {:ok, {"x86_64", "apple", _}} ->
         {"darwin", "amd64"}
 
-      {:unix, :darwin, "aarch64"} ->
+      {:ok, {"aarch64", "apple", _}} ->
         {"darwin", "arm64"}
 
-      {:unix, os_name, _} ->
-        {to_string(os_name), nil}
+      {:ok, {"x86_64", "windows", _}} ->
+        {"windows", "amd64"}
+
+      {:ok, {"aarch64", "windows", _}} ->
+        {"windows", "arm64"}
+
+      {:ok, {_, os_name, _}} ->
+        {os_name, nil}
     end
   end
 
-  defp system_arch(osfamily) do
-    arch =
-      :erlang.system_info(:system_architecture)
-      |> List.to_string()
-      |> String.split("-")
-      |> List.first()
+  defp platform_from_env do
+    os = System.get_env("ODU_GOOS")
+    arch = System.get_env("ODU_GOARCH")
 
-    # normalize
-    arch =
-      if osfamily == :win32 && :erlang.system_info(:wordsize) == 8 do
-        "amd64"
-      else
-        arch
+    if os && arch do
+      {os, arch}
+    else
+      {nil, nil}
+    end
+  end
+
+  defp current_target({:win32, _}) do
+    processor_architecture =
+      String.downcase(String.trim(System.get_env("PROCESSOR_ARCHITECTURE")))
+
+    compiler =
+      case :erlang.system_info(:c_compiler_used) do
+        {:msc, _} -> "msvc"
+        {:gnuc, _} -> "gnu"
+        {other, _} -> Atom.to_string(other)
       end
 
-    case arch do
-      "x86_64" -> "amd64"
-      arch -> arch
+    # https://docs.microsoft.com/en-gb/windows/win32/winprog64/wow64-implementation-details?redirectedfrom=MSDN
+    case processor_architecture do
+      "amd64" ->
+        {:ok, {"x86_64", "windows", compiler}}
+
+      "ia64" ->
+        {:ok, {"ia64", "windows", compiler}}
+
+      "arm64" ->
+        {:ok, {"aarch64", "windows", compiler}}
+
+      "x86" ->
+        {:ok, {"x86", "windows", compiler}}
+    end
+  end
+
+  defp current_target({:unix, _}) do
+    # get current target triplet from `:erlang.system_info/1`
+    system_architecture = to_string(:erlang.system_info(:system_architecture))
+    current = String.split(system_architecture, "-", trim: true)
+
+    case length(current) do
+      4 ->
+        {:ok, {Enum.at(current, 0), Enum.at(current, 2), Enum.at(current, 3)}}
+
+      3 ->
+        case :os.type() do
+          {:unix, :darwin} ->
+            # could be something like aarch64-apple-darwin21.0.0
+            # but we don't really need the last 21.0.0 part
+            # credo:disable-for-next-line
+            if String.match?(Enum.at(current, 2), ~r/^darwin.*/) do
+              {:ok, {Enum.at(current, 0), Enum.at(current, 1), "darwin"}}
+            else
+              {:ok, system_architecture}
+            end
+
+          _ ->
+            {:ok, system_architecture}
+        end
+
+      _ ->
+        {:error, "cannot decide current target"}
     end
   end
 end
