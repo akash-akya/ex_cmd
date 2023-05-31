@@ -20,8 +20,26 @@ defmodule ExCmdTest do
   test "when command fail with non-zero exit status" do
     proc_stream = ExCmd.stream!(["sh", "-c", "exit 5"])
 
-    assert_raise ExCmd.Process.Error, "command exited with status: 5", fn ->
-      proc_stream |> Enum.to_list()
+    assert_raise ExCmd.Stream.AbnormalExit, "program exited with exit status: 5", fn ->
+      proc_stream
+      |> Enum.to_list()
     end
+  end
+
+  test "abnormal exit status" do
+    proc_stream = ExCmd.stream!(["sh", "-c", "exit 5"])
+
+    exit_status =
+      try do
+        proc_stream
+        |> Enum.to_list()
+
+        nil
+      rescue
+        e in ExCmd.Stream.AbnormalExit ->
+          e.exit_status
+      end
+
+    assert exit_status == 5
   end
 end
