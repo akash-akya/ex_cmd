@@ -90,9 +90,9 @@ defmodule ExCmd.Stream do
           # always close stdin before stoping to give the command chance to exit properly
           Process.close_stdin(process)
 
-          result = Process.await_exit(process, stream_opts[:exit_timeout])
-
           if exit_type == :normal do
+            result = Process.await_exit(process, stream_opts[:exit_timeout])
+
             case result do
               {:ok, 0} ->
                 :ok
