@@ -43,6 +43,34 @@ defmodule ExCmd do
   |> Stream.into(File.stream!("music.mp3"))
   |> Stream.run()
   ```
+
+  With input as list
+
+  ```
+  iex> ExCmd.stream!(~w(cat), input: ["Hello ", "World"])
+  ...> |> Enum.into("")
+  "Hello World"
+  ```
+
+  ```
+  iex> ExCmd.stream!(~w(base64), input: ["Hello ", "World"])
+  ...> |> Enum.into("")
+  "SGVsbG8gV29ybGQ=\n"
+  ```
+
+
+  When program exit abnormally it will raise `ExCmd.Stream.AbnormalExit` error with exit_status.
+
+  ```
+  iex> try do
+  ...>   ExCmd.stream!(["sh", "-c", "exit 5"]) |> Enum.to_list()
+  ...> rescue
+  ...>   e in ExCmd.Stream.AbnormalExit ->
+  ...>    e.exit_status
+  ...> end
+  5
+  ```
+
   """
   @type collectable_func() :: (Collectable.t() -> any())
 

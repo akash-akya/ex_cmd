@@ -1,6 +1,8 @@
 defmodule ExCmdTest do
   use ExUnit.Case
 
+  doctest ExCmd
+
   test "stream" do
     str = "hello"
 
