@@ -6,6 +6,16 @@ defmodule ExCmd.Stream do
   alias ExCmd.Process
   alias ExCmd.Process.Error
 
+  defmodule AbnormalExit do
+    defexception [:message, :exit_status]
+
+    @impl true
+    def exception(exit_status) do
+      msg = "program exited with exit status: #{exit_status}"
+      %__MODULE__{message: msg, exit_status: exit_status}
+    end
+  end
+
   defmodule Sink do
     @moduledoc false
     defstruct [:process]
@@ -81,13 +91,13 @@ defmodule ExCmd.Stream do
             {:halt, :normal}
 
           error ->
-            raise Error, "Failed to read data from the command. error: #{inspect(error)}"
+            raise Error, "Failed to read data from the program. error: #{inspect(error)}"
         end
       end
 
       after_fun = fn exit_type ->
         try do
-          # always close stdin before stoping to give the command chance to exit properly
+          # always close stdin before stopping to give the command chance to exit properly
           Process.close_stdin(process)
 
           if exit_type == :normal do
@@ -98,10 +108,10 @@ defmodule ExCmd.Stream do
                 :ok
 
               {:ok, status} ->
-                raise Error, "command exited with status: #{status}"
+                raise AbnormalExit, status
 
               :timeout ->
-                raise Error, "command fail to exit within timeout: #{stream_opts.exit_timeout}"
+                raise Error, "program fail to exit within timeout: #{stream_opts.exit_timeout}"
             end
           end
         after
