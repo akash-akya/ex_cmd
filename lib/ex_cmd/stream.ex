@@ -41,40 +41,43 @@ defmodule ExCmd.Stream do
 
   defstruct [:process, :stream_opts]
 
-  @default_opts [exit_timeout: :infinity]
-
   @type t :: %__MODULE__{}
 
   @doc false
   def __build__(cmd_with_args, opts) do
     {stream_opts, process_opts} = Keyword.split(opts, [:exit_timeout, :input])
-    stream_opts = Keyword.merge(@default_opts, stream_opts)
 
-    {:ok, process} = Process.start_link(cmd_with_args, process_opts)
+    case normalize_stream_opts(stream_opts) do
+      {:ok, stream_opts} ->
+        {:ok, process} = Process.start_link(cmd_with_args, process_opts)
 
-    start_input_streamer(%Sink{process: process}, stream_opts[:input])
-    %ExCmd.Stream{process: process, stream_opts: stream_opts}
+        start_input_streamer(%Sink{process: process}, stream_opts[:input])
+
+        %ExCmd.Stream{
+          process: process,
+          stream_opts: stream_opts
+        }
+
+      {:error, error} ->
+        raise ArgumentError, message: error
+    end
   end
 
   @doc false
   defp start_input_streamer(sink, input) do
-    cond do
-      is_nil(input) ->
+    case input do
+      :no_input ->
         :ok
 
-      is_function(input, 1) ->
+      {:enumerable, enum} ->
         spawn_link(fn ->
-          input.(sink)
+          Enum.into(enum, sink)
         end)
 
-      Enumerable.impl_for(input) ->
+      {:collectable, func} ->
         spawn_link(fn ->
-          Enum.into(input, sink)
+          func.(sink)
         end)
-
-      true ->
-        raise ArgumentError,
-          message: ":input must be either Enumerable or a function with arity 1"
     end
   end
 
@@ -132,6 +135,55 @@ defmodule ExCmd.Stream do
 
     def slice(_stream) do
       {:error, __MODULE__}
+    end
+  end
+
+  @spec normalize_input(term) ::
+          {:ok, :no_input} | {:ok, {:enumerable, term}} | {:ok, {:collectable, function}}
+  defp normalize_input(term) do
+    cond do
+      is_nil(term) ->
+        {:ok, :no_input}
+
+      is_binary(term) ->
+        {:ok, {:enumerable, [IO.iodata_to_binary(term)]}}
+
+      is_function(term, 1) ->
+        {:ok, {:collectable, term}}
+
+      Enumerable.impl_for(term) ->
+        {:ok, {:enumerable, term}}
+
+      true ->
+        {:error, "`:input` must be either Enumerable or a function which accepts collectable"}
+    end
+  end
+
+  defp normalize_exit_timeout(timeout) do
+    case timeout do
+      nil ->
+        {:ok, :infinity}
+
+      :infinity ->
+        {:ok, :infinity}
+
+      timeout when is_integer(timeout) and timeout > 0 ->
+        {:ok, timeout}
+
+      _ ->
+        {:error, ":exit_timeout must be either :infinity or a non-zero integer"}
+    end
+  end
+
+  defp normalize_stream_opts(opts) do
+    with {:ok, input} <- normalize_input(opts[:input]),
+         {:ok, exit_timeout} <- normalize_exit_timeout(opts[:exit_timeout]) do
+      opts = %{
+        input: input,
+        exit_timeout: exit_timeout
+      }
+
+      {:ok, opts}
     end
   end
 end
