@@ -106,7 +106,7 @@ defmodule ExCmd do
   ...>    e.exit_status
   ...> end
   5
-
+  ```
   """
   @type collectable_func() :: (Collectable.t() -> any())
 
