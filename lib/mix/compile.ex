@@ -172,11 +172,11 @@ defmodule Mix.Tasks.Compile.Odu do
             if String.match?(Enum.at(current, 2), ~r/^darwin.*/) do
               {:ok, {Enum.at(current, 0), Enum.at(current, 1), "darwin"}}
             else
-              {:ok, system_architecture}
+              {:ok, List.to_tuple(current)}
             end
 
           _ ->
-            {:ok, system_architecture}
+            {:ok, List.to_tuple(current)}
         end
 
       _ ->
