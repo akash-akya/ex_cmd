@@ -150,8 +150,11 @@ func writePacket(tag uint8, data []byte) {
 	_, writeErr := os.Stdout.Write(buf[:payloadLen+4])
 	if writeErr != nil {
 		switch writeErr.(type) {
-		// ignore broken pipe or closed pipe errors
+		// ignore broken pipe or closed pipe errors here.
+		// currently readCommandStdout closes output chan, making the
+		// flow break.
 		case *os.PathError:
+			logger.Printf("os.PathError: ", writeErr)
 			return
 		default:
 			fatal(writeErr)
