@@ -35,6 +35,8 @@ defmodule ExCmdExitTest do
 
   defp os_process_alive?(pid) do
     if windows?() do
+      IO.inspect(["tasklist", "/fi", "pid eq #{pid}"])
+
       case cmd(["tasklist", "/fi", "pid eq #{pid}"]) do
         {"INFO: No tasks are running which match the specified criteria.\r\n", 0} -> false
         {_, 0} -> true
