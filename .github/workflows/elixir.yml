@@ -91,15 +91,13 @@ jobs:
   macos:
     runs-on: macos-11
     steps:
-      - uses: actions/checkout@v3
-      - name: Install Erlang & Elixir
-        run: |
-          brew install erlang elixir
-          mix local.hex --force
-          mix local.rebar --force
-      - run: mix deps.get
-      - run: mix compile --warnings-as-errors
-      - run: mix test --trace
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - uses: DeterminateSystems/flake-checker-action@main
+      - run: nix develop --command mix deps.get
+      - run: nix develop --command mix compile --warnings-as-errors
+      - run: nix develop --command mix test --trace
 
   windows:
     runs-on: windows-2019
