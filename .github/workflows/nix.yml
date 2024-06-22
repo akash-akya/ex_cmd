@@ -1,4 +1,4 @@
-name: CI
+name: Nix Test
 on:
   - push
 jobs:
@@ -6,11 +6,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: cachix/install-nix-action@v27
-        with:
-          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - uses: DeterminateSystems/flake-checker-action@main
       - run: nix develop
-      - run: nix flake check
       - run: |
           nix develop --command \
             mix deps.get
@@ -25,11 +24,10 @@ jobs:
     runs-on: macos-11
     steps:
       - uses: actions/checkout@v4
-      - uses: cachix/install-nix-action@v27
-        with:
-          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - uses: DeterminateSystems/flake-checker-action@main
       - run: nix develop
-      - run: nix flake check
       - run: |
           nix develop --command \
             mix deps.get
