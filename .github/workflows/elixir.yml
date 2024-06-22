@@ -95,7 +95,6 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
       - uses: DeterminateSystems/flake-checker-action@main
-      - run: nix develop
       - run: nix develop --command mix deps.get
       - run: nix develop --command mix compile --warnings-as-errors
       - run: nix develop --command mix test --trace

@@ -2,22 +2,23 @@
   description = "Elixir Development Environment";
 
   inputs = {
-    nixpkgs = { url = "github:NixOS/nixpkgs/nixos-24.05"; };
-    flake-utils = { url = "github:numtide/flake-utils"; };
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.05";
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
-   flake-utils.lib.eachDefaultSystem (system:
-      let
-        inherit (pkgs.lib) optional optionals;
+  outputs = { self, nixpkgs, ... }:
+    let
+      supportedSystems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
+      forAllSystems = f: nixpkgs.lib.genAttrs supportedSystems (system: f {
         pkgs = import nixpkgs { inherit system; };
-      in
-      with pkgs;
-      {
-        devShell = pkgs.mkShell {
-          buildInputs = [
-            elixir
-          ] ;
-        };
       });
+    in
+      {
+        devShells = forAllSystems ({ pkgs }: {
+          default = pkgs.mkShell {
+            packages = with pkgs; [
+              elixir
+            ];
+          };
+        });
+      };
 }
