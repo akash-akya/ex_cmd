@@ -89,7 +89,7 @@ jobs:
       - run: mix test --trace
 
   macos:
-    runs-on: macos-11
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
