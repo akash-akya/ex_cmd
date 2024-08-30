@@ -6,7 +6,9 @@ import (
 	"os/exec"
 )
 
-func startCommandPipeline(proc *exec.Cmd, input <-chan Packet, inputDemand chan<- Packet, outputDemand <-chan Packet) <-chan Packet {
+func startCommandPipeline(proc *exec.Cmd, input <-chan Packet, inputDemand chan<- Packet, outputDemand <-chan Packet) chan Packet {
+	logger.Printf("Command: %v\n", proc.String())
+
 	cmdInput, err := proc.StdinPipe()
 	fatalIf(err)
 

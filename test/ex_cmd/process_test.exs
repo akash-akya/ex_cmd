@@ -34,6 +34,14 @@ defmodule ExCmd.ProcessTest do
     assert {:done, 0} == Process.status(s)
   end
 
+  test "await_exit without read" do
+    {:ok, s} = Process.start_link(~w(cat))
+    assert :ok == Process.write(s, "hello")
+    assert :ok == Process.close_stdin(s)
+    :timer.sleep(50)
+    assert {:ok, 0} = Process.await_exit(s)
+  end
+
   test "stdin close" do
     logger = start_events_collector()
 

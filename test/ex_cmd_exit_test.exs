@@ -4,7 +4,7 @@ defmodule ExCmdExitTest do
   # currently running `elixir` command is not working in Windows
   @tag os: :unix
   test "if it kills external command on abnormal vm exit" do
-    ex_cmd_expr = ~S{ExCmd.stream!(["cat"]) |> Stream.run()}
+    ex_cmd_expr = ~S{ExCmd.stream!(["sleep", "10"]) |> Stream.run()}
 
     port =
       Port.open(
@@ -29,7 +29,7 @@ defmodule ExCmdExitTest do
     assert {:ok, _msg} = os_process_kill(os_pid)
 
     # wait for the cleanup
-    :timer.sleep(5000)
+    :timer.sleep(3000)
 
     refute os_process_alive?(os_pid)
     refute os_process_alive?(cmd_pid)
