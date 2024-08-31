@@ -93,7 +93,6 @@ func stdinReader(cmdInput chan<- Packet, cmdOutputDemand chan<- Packet, writerDo
 	defer func() {
 		close(cmdInput)
 		close(cmdOutputDemand)
-		close(stdinClose)
 	}()
 
 	for {
@@ -105,6 +104,7 @@ func stdinReader(cmdInput chan<- Packet, cmdOutputDemand chan<- Packet, writerDo
 
 		packet, readErr := readPacketFromStdin()
 		if readErr == io.EOF {
+			close(stdinClose)
 			return
 		} else if readErr != nil {
 			fatal(readErr)
