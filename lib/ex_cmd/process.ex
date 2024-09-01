@@ -9,7 +9,7 @@ defmodule ExCmd.Process do
     defexception [:message]
   end
 
-  @default [log: false]
+  @default [log: true]
 
   alias Mix.Tasks.Compile.Odu
 
