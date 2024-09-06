@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os/exec"
 	"flag"
 	"fmt"
 	"os"
@@ -33,9 +34,20 @@ func main() {
 	validateArgs(args)
 
 	err := execute(*cdFlag, args)
-	if err != nil {
-		os.Exit(getExitStatus(err))
+
+	if err == nil {
+		os.Exit(0)
 	}
+
+	if exitError, ok := err.(*exec.Error); ok {
+		// This shouldn't really happen in practice because we check for
+		// program existence in Elixir, before launching odu
+		logger.Printf("Command exited with error: %v", exitError)
+	} else  {
+		logger.Printf("Command exited with unknown errors", err)
+	}
+
+	os.Exit(3)
 }
 
 func validateArgs(args []string) {

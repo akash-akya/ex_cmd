@@ -6,7 +6,9 @@ import (
 	"os/exec"
 )
 
-func startCommandPipeline(proc *exec.Cmd, input <-chan Packet, inputDemand chan<- Packet, outputDemand <-chan Packet) <-chan Packet {
+func startCommandPipeline(proc *exec.Cmd, input <-chan []byte, inputDemand chan<- Packet, outputDemand <-chan Packet) chan []byte {
+	logger.Printf("Command: %v\n", proc.String())
+
 	cmdInput, err := proc.StdinPipe()
 	fatalIf(err)
 
@@ -23,76 +25,87 @@ func startCommandPipeline(proc *exec.Cmd, input <-chan Packet, inputDemand chan<
 
 	go printStderr(cmdError)
 
-	output := make(chan Packet)
+	output := make(chan []byte)
 	go readCommandStdout(cmdOutput, outputDemand, output)
 
 	return output
 }
 
-func writeToCommandStdin(cmdInput io.WriteCloser, input <-chan Packet, inputDemand chan<- Packet) {
-	var packet Packet
+func writeToCommandStdin(cmdInput io.WriteCloser, input <- chan []byte, inputDemand chan<- Packet) {
+	var data []byte
 	var ok bool
 
 	defer func() {
 		cmdInput.Close()
-		// close(inputDemand)
 	}()
 
 	for {
 		inputDemand <- Packet{SendInput, make([]byte, 0)}
 
 		select {
-		case packet, ok = <-input:
-			if !ok {
-				return
-			}
-		}
-
-		switch packet.tag {
-		case CloseInput:
-			return
-
-		case Input:
-			// blocking
-			_, writeErr := cmdInput.Write(packet.data)
-			if writeErr != nil {
-				switch writeErr.(type) {
-				// ignore broken pipe or closed pipe errors
-				case *os.PathError:
-					return
-				default:
-					fatal(writeErr)
-				}
-			}
-		}
-	}
-}
-
-func readCommandStdout(cmdOutput io.ReadCloser, outputDemand <-chan Packet, output chan<- Packet) {
-	var buf [BufferSize]byte
-
-	defer func() {
-		output <- Packet{OutputEOF, make([]byte, 0)}
-		cmdOutput.Close()
-		close(output)
-	}()
-
-	for {
-		select {
-		case _, ok := <-outputDemand:
+		case data, ok = <-input:
 			if !ok {
 				return
 			}
 		}
 
 		// blocking
-		bytesRead, readErr := cmdOutput.Read(buf[:])
-		if bytesRead > 0 {
-			output <- Packet{Output, buf[:bytesRead]}
-		} else if readErr == io.EOF || bytesRead == 0 {
-			return
-		} else {
-			fatal(readErr)
+		_, writeErr := cmdInput.Write(data)
+		if writeErr != nil {
+			switch writeErr.(type) {
+			// ignore broken pipe or closed pipe errors
+			case *os.PathError:
+				return
+			default:
+				fatal(writeErr)
+			}
+		}
+	}
+}
+
+func readCommandStdout(cmdOutput io.ReadCloser, outputDemand <-chan Packet, output chan<- []byte) {
+	var buf [BufferSize]byte
+	var packet Packet
+	var ok bool
+
+	cmdOutputClosed := false
+
+	for {
+		select {
+		case packet, ok = <-outputDemand:
+			if !ok {
+				return
+			}
+		}
+
+		switch packet.tag {
+		case CloseOutput:
+			if !cmdOutputClosed {
+				// we don't have to actually close the pipe.
+				// proc.Wait() internally closes all pipes
+				cmdOutput.Close()
+				cmdOutputClosed = true
+				logger.Printf("close command output")
+			} else {
+				fatal("close command on closed command output")
+			}
+
+		case SendOutput:
+			if cmdOutputClosed {
+				fatal("asking output while command output is closed")
+			}
+
+			// blocking
+			bytesRead, readErr := cmdOutput.Read(buf[:])
+			if bytesRead > 0 {
+				output <- buf[:bytesRead]
+			} else if readErr == io.EOF || bytesRead == 0 {
+				logger.Printf("cmdStdout return %v", readErr)
+				output <- make([]byte, 0)
+				return
+			} else {
+				fatal(readErr)
+			}
 		}
 	}
 }
