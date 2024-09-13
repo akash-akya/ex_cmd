@@ -239,7 +239,7 @@ defmodule ExCmd.Process do
   # pipe does not terminate the sleep command.
   iex> {:ok, p} = Process.start_link(~w(sleep 100000000)) # sleep indefinitely
   iex> Process.await_exit(p, 100) # ensure `await_exit` finish within `100ms`. By default it waits for 5s
-  {:ok, 143} # 143 is the exit status when command exit due to SIGTERM
+  {:error, :killed} # command exit due to SIGTERM
   ```
 
   ## Examples
@@ -1015,7 +1015,11 @@ defmodule ExCmd.Process do
   end
 
   @spec divide_timeout(non_neg_integer) :: {non_neg_integer, non_neg_integer}
-  defp(divide_timeout(timeout)) do
+  defp divide_timeout(timeout) when timeout < 10, do: {0, 0}
+
+  defp divide_timeout(timeout) do
+    timeout = timeout - 10
+
     if timeout < 50 do
       {timeout, 0}
     else

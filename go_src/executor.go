@@ -44,7 +44,7 @@ func execute(workdir string, args []string) error {
 	writerDone := make(chan struct{})
 	// must be buffered so that function can close without blocking
 	stdinClose := make(chan struct{}, 1)
-	kill := make(chan struct{})
+	kill := make(chan bool, 1)
 	sigs := make(chan os.Signal)
 
 	// Capture common signals.
@@ -75,7 +75,7 @@ func execute(workdir string, args []string) error {
 	return err
 }
 
-func runPipeline(proc *exec.Cmd, writerDone chan struct{}, stdinClose chan struct{}, kill chan struct{}){
+func runPipeline(proc *exec.Cmd, writerDone chan struct{}, stdinClose chan struct{}, kill chan<- bool){
 	cmdInput := make(chan []byte, 1)
 	cmdOutputDemand := make(chan Packet)
 	cmdInputDemand := make(chan Packet)
@@ -87,7 +87,7 @@ func runPipeline(proc *exec.Cmd, writerDone chan struct{}, stdinClose chan struc
 	go stdoutWriter(proc.Process.Pid, cmdOutput, cmdInputDemand, writerDone)
 }
 
-func stdinReader(cmdInput chan<- []byte, cmdOutputDemand chan<- Packet, writerDone <-chan struct{}, stdinClose chan<- struct{}, kill chan<- struct{}) {
+func stdinReader(cmdInput chan<- []byte, cmdOutputDemand chan<- Packet, writerDone <-chan struct{}, stdinClose chan<- struct{}, kill chan<- bool) {
 	// closeChan := closeInputHandler(input)
 	cmdInputClosed := false
 	killCommand := false
@@ -117,7 +117,7 @@ func stdinReader(cmdInput chan<- []byte, cmdOutputDemand chan<- Packet, writerDo
 		switch packet.tag {
 		case Kill:
 			if !killCommand {
-				close(kill)
+				kill <- true
 				killCommand = true
 			}
 
@@ -156,6 +156,7 @@ func stdoutWriter(pid int, cmdStdout <-chan []byte, cmdInputDemand <-chan Packet
 		if !cmdOutputClosed {
 			writePacketToStdout(OutputEOF, make([]byte, 0))
 		}
+		logger.Printf("writerDone")
 		close(writerDone)
 	}()
 
@@ -180,7 +181,6 @@ func stdoutWriter(pid int, cmdStdout <-chan []byte, cmdInputDemand <-chan Packet
 				fatal("error on cmdStdout")
 			}
 
-
 			if len(data) > BufferSize {
 				fatal("Invalid payloadLen")
 			} else if (len(data) == 0) {
@@ -196,7 +196,7 @@ func stdoutWriter(pid int, cmdStdout <-chan []byte, cmdInputDemand <-chan Packet
 	}
 }
 
-func waitPipelineTermination(proc *exec.Cmd, sigs <-chan os.Signal, stdinClose <-chan struct{}, writerDone <-chan struct{}, kill <-chan struct{}) error {
+func waitPipelineTermination(proc *exec.Cmd, sigs <-chan os.Signal, stdinClose <-chan struct{}, writerDone <-chan struct{}, kill <-chan bool) error {
 	timeout := 1 * time.Second
 
 	select {
@@ -219,22 +219,29 @@ func waitPipelineTermination(proc *exec.Cmd, sigs <-chan os.Signal, stdinClose <
 		cmdExit <- proc.Wait()
 	}()
 
-	return safeExit(proc, cmdExit, timeout)
+	return safeExit(proc, cmdExit, kill, timeout)
 }
 
-func safeExit(proc *exec.Cmd, procErr <-chan error, timeout time.Duration) error {
+func safeExit(proc *exec.Cmd, procErr <-chan error, kill <-chan bool, timeout time.Duration) error {
 	logger.Printf("Attempt graceful exit\n")
 
 	select {
 	case err := <-procErr:
 		logger.Printf("Cmd completed with err: %v", err)
 		return err
+	case <- kill:
+		if err := proc.Process.Kill(); err != nil {
+			logger.Fatal("failed to kill process: ", err)
+			return err
+		}
+		logger.Println("process killed by user signal")
+		return <-procErr
 	case <-time.After(timeout):
 		if err := proc.Process.Kill(); err != nil {
 			logger.Fatal("failed to kill process: ", err)
 			return err
 		}
-		logger.Println("process killed as timeout reached")
+		logger.Println("process killed as exit timeout reached")
 		return <-procErr
 	}
 }

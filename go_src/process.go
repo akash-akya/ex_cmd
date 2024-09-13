@@ -81,11 +81,12 @@ func readCommandStdout(cmdOutput io.ReadCloser, outputDemand <-chan Packet, outp
 		switch packet.tag {
 		case CloseOutput:
 			if !cmdOutputClosed {
-				// we don't have to actually close the pipe.
+				logger.Printf("close command output")
+				// we don't actually have to close the pipe.
 				// proc.Wait() internally closes all pipes
 				cmdOutput.Close()
 				cmdOutputClosed = true
-				logger.Printf("close command output")
+				output <- make([]byte, 0)
 			} else {
 				fatal("close command on closed command output")
 			}
@@ -101,6 +102,7 @@ func readCommandStdout(cmdOutput io.ReadCloser, outputDemand <-chan Packet, outp
 				output <- buf[:bytesRead]
 			} else if readErr == io.EOF || bytesRead == 0 {
 				logger.Printf("cmdStdout return %v", readErr)
+				cmdOutputClosed = true
 				output <- make([]byte, 0)
 				return
 			} else {

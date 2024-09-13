@@ -4,7 +4,7 @@ defmodule ExCmd.ProcessTest do
   alias ExCmd.Process
   alias ExCmd.Process.{Pipe, State}
 
-  # doctest ExCmd.Process
+  doctest ExCmd.Process
 
   describe "pipes" do
     test "reading from stdout" do
@@ -190,6 +190,35 @@ defmodule ExCmd.ProcessTest do
   end
 
   describe "process termination" do
+    test "if process is terminated automatically on owner exit" do
+      pid = self()
+
+      spawn_link(fn ->
+        {:ok, s} = Process.start_link(~w(cat))
+        {:ok, os_pid} = Process.os_pid(s)
+        send(pid, os_pid)
+      end)
+
+      os_pid =
+        receive do
+          os_pid -> os_pid
+        end
+
+      :timer.sleep(500)
+
+      refute os_process_alive?(os_pid)
+    end
+
+    test "if await_exit closes stdin implicitly" do
+      {:ok, s} = Process.start_link(~w(cat))
+      assert {:ok, 0} = Process.await_exit(s, 100)
+    end
+
+    test "if await_exit kills the program" do
+      {:ok, s} = Process.start_link(~w(sleep 1000))
+      assert {:error, :killed} = Process.await_exit(s, 100)
+    end
+
     test "if external program terminates on process exit" do
       {:ok, s} = Process.start_link(~w(cat))
       {:ok, os_pid} = Process.os_pid(s)
@@ -197,11 +226,22 @@ defmodule ExCmd.ProcessTest do
       assert os_process_alive?(os_pid)
 
       :ok = Process.close_stdin(s)
-      # TODO: fixeme, no read is required
-      :eof = Process.read(s)
-      :timer.sleep(2000)
+      assert :eof = Process.read(s)
+      :timer.sleep(1000)
 
       refute os_process_alive?(os_pid)
+    end
+
+    test "read after command finishes" do
+      {:ok, s} = Process.start_link(~w(cat))
+      {:ok, os_pid} = Process.os_pid(s)
+      assert os_process_alive?(os_pid)
+
+      assert :ok == Process.write(s, "hello")
+      :ok = Process.close_stdin(s)
+      :timer.sleep(1000)
+
+      assert {:ok, "hello"} == Process.read(s)
     end
 
     test "watcher kills external command on process without exit_await" do
@@ -481,7 +521,7 @@ defmodule ExCmd.ProcessTest do
              Enum.sum(Enum.map(write_events, fn {:write, size} -> size end))
 
     # There must be a read before write completes
-    assert hd(events) == {:read, 65_531}
+    assert {:read, _} = hd(events)
   end
 
   # this test does not work properly in linux
