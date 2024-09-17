@@ -40,7 +40,7 @@ type InputDispatcher func(Packet)
 
 type OutPacket func() (Packet, bool)
 
-func execute(workdir string, args []string) error {
+func execute(workdir string, args []string, stderrConfig string) error {
 	writerDone := make(chan struct{})
 	// must be buffered so that function can close without blocking
 	stdinClose := make(chan struct{}, 1)
@@ -59,7 +59,7 @@ func execute(workdir string, args []string) error {
 	proc.Dir = workdir
 	proc.Env = append(os.Environ(), readEnvFromStdin()...)
 
-	runPipeline(proc, writerDone, stdinClose, kill)
+	runPipeline(proc, writerDone, stdinClose, kill, stderrConfig)
 	err := waitPipelineTermination(proc, sigs, stdinClose, writerDone, kill)
 
 	if err == nil {
@@ -75,12 +75,12 @@ func execute(workdir string, args []string) error {
 	return err
 }
 
-func runPipeline(proc *exec.Cmd, writerDone chan struct{}, stdinClose chan struct{}, kill chan<- bool){
+func runPipeline(proc *exec.Cmd, writerDone chan struct{}, stdinClose chan struct{}, kill chan<- bool, stderrConfig string){
 	cmdInput := make(chan []byte, 1)
 	cmdOutputDemand := make(chan Packet)
 	cmdInputDemand := make(chan Packet)
 
-	cmdOutput := startCommandPipeline(proc, cmdInput, cmdInputDemand, cmdOutputDemand)
+	cmdOutput := startCommandPipeline(proc, cmdInput, cmdInputDemand, cmdOutputDemand, stderrConfig)
 
 	// go handleSignals(input, outputDemand, done)
 	go stdinReader(cmdInput, cmdOutputDemand, writerDone, stdinClose, kill)

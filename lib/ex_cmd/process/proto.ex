@@ -174,10 +174,17 @@ defmodule ExCmd.Process.Proto do
       raise ArgumentError, message: ":cd is not a valid path"
     end
 
-    params = ["-cd", cd, "-protocol_version", @odu_protocol_version]
+    params = [
+      "-cd",
+      cd,
+      "-stderr",
+      to_string(opts[:stderr]),
+      "-protocol_version",
+      @odu_protocol_version
+    ]
 
-    if opts[:stderr] == :console do
-      params ++ ["-log", "|2"]
+    if opts[:log] do
+      params ++ ["-log", opts[:log]]
     else
       params
     end

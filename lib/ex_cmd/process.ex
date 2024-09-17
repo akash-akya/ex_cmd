@@ -167,48 +167,6 @@ defmodule ExCmd.Process do
   > stream.
 
 
-  ### Using `consume`
-
-  stderr data can be consumed separately using
-  `ExCmd.Process.read_stderr/2`. Special function
-  `ExCmd.Process.read_any/2` can be used to read from either stdout or
-  stderr whichever has the data available. See the examples for more
-  details.
-
-
-  > #### Unexpected Behaviors {: .warning}
-  >
-  > When set, the `stderr` output **MUST** be consumed to
-  > avoid blocking the external program when stderr buffer is full.
-
-  Reading from stderr using `read_stderr`
-
-  ```
-  # write "Hello" to stdout and "World" to stderr
-  iex> script = Enum.join(["echo Hello", "echo World >&2"], "\n")
-  iex> {:ok, p} = Process.start_link(["sh", "-c", script], stderr: :consume)
-  iex> Process.read(p, 100)
-  {:ok, "Hello\n"}
-  iex> Process.read_stderr(p, 100)
-  {:ok, "World\n"}
-  iex> Process.await_exit(p)
-  {:ok, 0}
-  ```
-
-  Reading using `read_any`
-
-  ```
-  # write "Hello" to stdout and "World" to stderr
-  iex> script = Enum.join(["echo Hello", "echo World >&2"], "\n")
-  iex> {:ok, p} = Process.start_link(["sh", "-c", script], stderr: :consume)
-  iex> Process.read_any(p)
-  {:ok, {:stdout, "Hello\n"}}
-  iex> Process.read_any(p)
-  {:ok, {:stderr, "World\n"}}
-  iex> Process.await_exit(p)
-  {:ok, 0}
-  ```
-
   ### Process Termination
 
   When owner does (normally or abnormally) the ExCmd process always
@@ -342,7 +300,7 @@ defmodule ExCmd.Process do
 
   @type caller :: GenServer.from()
 
-  @default_opts [env: [], stderr: :console]
+  @default_opts [env: [], stderr: :console, log: nil]
   @default_buffer_size 65_535
 
   @doc false
@@ -493,39 +451,6 @@ defmodule ExCmd.Process do
   def read(process, max_size \\ @default_buffer_size)
       when is_integer(max_size) and max_size > 0 do
     GenServer.call(process.pid, {:read_stdout, max_size}, :infinity)
-  end
-
-  @doc """
-  Returns bytes from executed command's stderr with maximum size `max_size`.
-  Pipe must be enabled with `stderr: :consume` to read the data.
-
-  Blocks if no bytes are written to stderr yet. And returns as soon as
-  bytes are available
-
-  Note that `max_size` is the maximum size of the returned data. But
-  the returned data can be less than that depending on how the program
-  flush the data etc.
-  """
-  @spec read_stderr(t, pos_integer()) :: {:ok, iodata} | :eof | {:error, any()}
-  def read_stderr(process, size \\ @default_buffer_size) when is_integer(size) and size > 0 do
-    GenServer.call(process.pid, {:read_stderr, size}, :infinity)
-  end
-
-  @doc """
-  Returns bytes from either stdout or stderr with maximum size
-  `max_size` whichever is available at that time.
-
-  Blocks if no bytes are written to stdout or stderr yet. And returns
-  as soon as data is available.
-
-  Note that `max_size` is the maximum size of the returned data. But
-  the returned data can be less than that depending on how the program
-  flush the data etc.
-  """
-  @spec read_any(t, pos_integer()) ::
-          {:ok, {:stdout, iodata}} | {:ok, {:stderr, iodata}} | :eof | {:error, any()}
-  def read_any(process, size \\ @default_buffer_size) when is_integer(size) and size > 0 do
-    GenServer.call(process.pid, {:read_stdout_or_stderr, size}, :infinity)
   end
 
   @doc """
@@ -710,30 +635,6 @@ defmodule ExCmd.Process do
     end
   end
 
-  def handle_call({:read_stderr, size}, from, state) do
-    IO.inspect({:read_stderr, size})
-
-    case Operations.read(state, {:read_stderr, from, size}) do
-      {:noreply, state} ->
-        {:noreply, state}
-
-      ret ->
-        {:reply, ret, state}
-    end
-  end
-
-  def handle_call({:read_stdout_or_stderr, size}, from, state) do
-    IO.inspect({:read_stdout_or_stderr, size})
-
-    case Operations.read_any(state, {:read_stdout_or_stderr, from, size}) do
-      {:noreply, state} ->
-        {:noreply, state}
-
-      ret ->
-        {:reply, ret, state}
-    end
-  end
-
   def handle_call({:write_stdin, binary}, from, state) do
     IO.inspect({:write_stdin, byte_size(binary)})
 
@@ -885,7 +786,7 @@ defmodule ExCmd.Process do
     Process.flag(:trap_exit, true)
 
     %{cmd_with_args: cmd_with_args, env: env} = state.args
-    {os_pid, port} = Proto.start(cmd_with_args, env, Map.take(state.args, [:stderr, :cd]))
+    {os_pid, port} = Proto.start(cmd_with_args, env, Map.take(state.args, [:log, :stderr, :cd]))
 
     stderr =
       if state.stderr == :consume do

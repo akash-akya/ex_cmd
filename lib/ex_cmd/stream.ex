@@ -108,13 +108,12 @@ defmodule ExCmd.Stream do
           %{
             process: process,
             stream_opts: %{
-              stderr: stderr,
               stream_exit_status: stream_exit_status,
               max_chunk_size: max_chunk_size
             }
           } = state
 
-          case Process.read_any(process, max_chunk_size) do
+          case Process.read(process, max_chunk_size) do
             :eof when stream_exit_status == false ->
               {:halt, {state, :eof}}
 
@@ -122,12 +121,8 @@ defmodule ExCmd.Stream do
               elem = [await_exit(state, :eof)]
               {elem, {state, :exited}}
 
-            {:ok, {:stdout, x}} when stderr != :consume ->
+            {:ok, x} ->
               elem = [IO.iodata_to_binary(x)]
-              {elem, {state, exit_state}}
-
-            {:ok, {io_stream, x}} when stderr == :consume ->
-              elem = [{io_stream, IO.iodata_to_binary(x)}]
               {elem, {state, exit_state}}
 
             {:error, errno} ->

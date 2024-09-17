@@ -16,6 +16,7 @@ const ProtocolVersion = "1.0"
 const usage = "Usage: odu [options] -- <program> [<arg>...]"
 
 var cdFlag = flag.String("cd", ".", "working directory for the spawned process")
+var stderrFlag = flag.String("stderr", "console", "how to handle spawned process stderr stream")
 var logFlag = flag.String("log", "", "enable logging")
 var protocolVersionFlag = flag.String("protocol_version", "", "protocol version")
 var versionFlag = flag.Bool("v", false, "print version and exit")
@@ -30,10 +31,19 @@ func main() {
 		os.Exit(0)
 	}
 
+	switch *stderrFlag {
+	case "console":
+	case "disable":
+	case "redirect_to_stdout":
+	default:
+		logger.Printf("invalid stderr flag")
+		os.Exit(3)
+	}
+
 	args := flag.Args()
 	validateArgs(args)
 
-	err := execute(*cdFlag, args)
+	err := execute(*cdFlag, args, *stderrFlag)
 
 	if err == nil {
 		os.Exit(0)
@@ -59,7 +69,7 @@ func validateArgs(args []string) {
 		dieUsage(fmt.Sprintf("Invalid version specified: %v  Supported version: %v", *protocolVersionFlag, ProtocolVersion))
 	}
 
-	logger.Printf("dir:%v, log:%v, protocol_version:%v, args:%v\n", *cdFlag, *logFlag, *protocolVersionFlag, args)
+	logger.Printf("dir:%v, log:%v, protocol_version:%v, stderr: %v, args:%v\n", *cdFlag, *logFlag, *protocolVersionFlag, *stderrFlag, args)
 }
 
 func notFifo(path string) bool {

@@ -78,48 +78,32 @@ defmodule ExCmd.ProcessTest do
              ] == get_events(logger)
     end
 
-    # TODO: stderr is not supported
-    # test "reading from stderr" do
-    #   {:ok, s} = Process.start_link(["sh", "-c", "echo foo >>/dev/stderr"], stderr: :consume)
-    #   # TODO: stderr is not supported
-    #   assert {:ok, "foo\n"} = Process.read_stderr(s, 100)
-    # end
-
-    # test "reading from stdout or stderr using read_any" do
-    #   script = """
-    #   echo "foo"
-    #   echo "bar" >&2
-    #   """
-
-    #   {:ok, s} = Process.start_link(["sh", "-c", script], stderr: :consume)
-
-    #   {:ok, ret1} = Process.read_any(s, 100)
-    #   {:ok, ret2} = Process.read_any(s, 100)
-
-    #   assert {:stderr, "bar\n"} in [ret1, ret2]
-    #   assert {:stdout, "foo\n"} in [ret1, ret2]
-
-    #   assert :eof = Process.read_any(s, 100)
-    # end
-
-    # test "reading from stderr_read when stderr disabled" do
-    #   {:ok, s} = Process.start_link(["sh", "-c", "echo foo >>/dev/stderr"], stderr: :console)
-
-    #   assert {:error, :pipe_closed_or_invalid_caller} = Process.read_stderr(s, 100)
-    # end
-
-    test "read_any with stderr disabled" do
+    test "stderr disabled" do
       script = """
-      echo "foo"
-      echo "bar" >&2
+      echo "==foo=="
+      echo "==bar==" >&2
       """
 
-      {:ok, s} = Process.start_link(["sh", "-c", script], stderr: :console)
-      {:ok, ret} = Process.read_any(s, 100)
+      {:ok, s} = Process.start_link(["sh", "-c", script], stderr: :disable)
 
-      # we can still read from stdout even if stderr is disabled
-      assert ret == {:stdout, "foo\n"}
-      assert :eof = Process.read_any(s, 100)
+      assert {:ok, "==foo==\n"} = Process.read(s, 100)
+      assert :eof = Process.read(s, 100)
+      assert {:ok, 0} = Process.await_exit(s, 100)
+    end
+
+    test "stderr redirect_to_stdout" do
+      script = """
+      echo "==foo=="
+      echo "==bar==" >&2
+      """
+
+      {:ok, s} = Process.start_link(["sh", "-c", script], stderr: :redirect_to_stdout)
+      # wait for the the both output to merge
+      :timer.sleep(500)
+
+      assert {:ok, "==foo==\n==bar==\n"} = Process.read(s, 100)
+      assert :eof = Process.read(s, 100)
+      assert {:ok, 0} = Process.await_exit(s, 100)
     end
 
     test "if pipe gets closed on pipe owner exit normally" do

@@ -22,8 +22,9 @@ defmodule ExCmd.Process.Exec do
          :ok <- validate_opts_fields(opts),
          {:ok, cd} <- normalize_cd(opts[:cd]),
          {:ok, stderr} <- normalize_stderr(opts[:stderr]),
+         {:ok, log} <- normalize_log(opts[:log]),
          {:ok, env} <- normalize_env(opts[:env]) do
-      {:ok, %{cmd_with_args: [cmd | args], cd: cd, env: env, stderr: stderr}}
+      {:ok, %{cmd_with_args: [cmd | args], cd: cd, env: env, stderr: stderr, log: log}}
     end
   end
 
@@ -98,7 +99,7 @@ defmodule ExCmd.Process.Exec do
       nil ->
         {:ok, :console}
 
-      stderr when stderr in [:console, :disable] ->
+      stderr when stderr in [:console, :disable, :redirect_to_stdout] ->
         {:ok, stderr}
 
       _ ->
@@ -107,9 +108,30 @@ defmodule ExCmd.Process.Exec do
     end
   end
 
+  @spec normalize_log(log :: nil | :stdout | :stderr | String.t()) ::
+          {:ok, nil | String.t()} | {:error, String.t()}
+  defp normalize_log(log) do
+    case log do
+      nil ->
+        {:ok, nil}
+
+      :stdout ->
+        {:ok, "|1"}
+
+      :stderr ->
+        {:ok, "|2"}
+
+      file when is_binary(file) ->
+        {:ok, file}
+
+      _ ->
+        {:error, ":log must be an atom and one of nil, :stdout, :stderr, or path"}
+    end
+  end
+
   @spec validate_opts_fields(keyword) :: :ok | {:error, String.t()}
   defp validate_opts_fields(opts) do
-    {_, additional_opts} = Keyword.split(opts, [:cd, :env, :stderr])
+    {_, additional_opts} = Keyword.split(opts, [:cd, :env, :stderr, :log])
 
     if Enum.empty?(additional_opts) do
       :ok

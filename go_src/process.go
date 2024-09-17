@@ -6,7 +6,7 @@ import (
 	"os/exec"
 )
 
-func startCommandPipeline(proc *exec.Cmd, input <-chan []byte, inputDemand chan<- Packet, outputDemand <-chan Packet) chan []byte {
+func startCommandPipeline(proc *exec.Cmd, input <-chan []byte, inputDemand chan<- Packet, outputDemand <-chan Packet, stderrConfig string) chan []byte {
 	logger.Printf("Command: %v\n", proc.String())
 
 	cmdInput, err := proc.StdinPipe()
@@ -15,15 +15,19 @@ func startCommandPipeline(proc *exec.Cmd, input <-chan []byte, inputDemand chan<
 	cmdOutput, err := proc.StdoutPipe()
 	fatalIf(err)
 
-	cmdError, err := proc.StderrPipe()
-	fatalIf(err)
+	switch stderrConfig {
+	case "disable":
+		proc.Stderr = io.Discard
+	case "console":
+		proc.Stderr = os.Stderr
+	case "redirect_to_stdout":
+		proc.Stderr = proc.Stdout
+	}
 
 	execErr := proc.Start()
 	fatalIf(execErr)
 
 	go writeToCommandStdin(cmdInput, input, inputDemand)
-
-	go printStderr(cmdError)
 
 	output := make(chan []byte)
 	go readCommandStdout(cmdOutput, outputDemand, output)
@@ -108,25 +112,6 @@ func readCommandStdout(cmdOutput io.ReadCloser, outputDemand <-chan Packet, outp
 			} else {
 				fatal(readErr)
 			}
-		}
-	}
-}
-
-func printStderr(cmdError io.ReadCloser) {
-	var buf [BufferSize]byte
-
-	defer func() {
-		cmdError.Close()
-	}()
-
-	for {
-		bytesRead, readErr := cmdError.Read(buf[:])
-		if bytesRead > 0 {
-			logger.Printf(string(buf[:bytesRead]))
-		} else if readErr == io.EOF || bytesRead == 0 {
-			return
-		} else {
-			fatal(readErr)
 		}
 	}
 }
