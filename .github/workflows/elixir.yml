@@ -7,7 +7,7 @@ env:
   ELIXIR_VERSION: "1.14.0"
 jobs:
   lint:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     name: Lint OTP ${{matrix.otp}} / Elixir ${{matrix.elixir}}
     strategy:
       matrix:
@@ -23,7 +23,7 @@ jobs:
 
       - name: Cache Dependencies
         id: mix-cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             deps
@@ -42,26 +42,25 @@ jobs:
       - run: mix deps.get
       - run: mix deps.unlock --check-unused
       - run: mix format --check-formatted
+      - run: (cd go_src/ && test -z $(gofmt -l .))
       - run: mix compile --warnings-as-errors
       - run: mix credo --strict
       - run: mix dialyzer --plt
 
   linux:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     name: Linux OTP ${{matrix.otp}} / Elixir ${{matrix.elixir}}
     strategy:
       matrix:
         include:
-          - elixir: 1.12.x
-            otp: 23.x
-          - elixir: 1.13.x
-            otp: 24.x
           - elixir: 1.14.x
-            otp: 25.x
+            otp: 24.x
           - elixir: 1.15.x
-            otp: 26.x
+            otp: 25.x
           - elixir: 1.16.x
             otp: 26.x
+          - elixir: 1.17.x
+            otp: 27.x
     steps:
       - uses: erlef/setup-beam@v1
         with:
@@ -71,7 +70,7 @@ jobs:
 
       - name: Cache Dependencies
         id: mix-cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             deps
@@ -89,7 +88,7 @@ jobs:
       - run: mix test --trace
 
   macos:
-    runs-on: macos-11
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
@@ -100,23 +99,23 @@ jobs:
       - run: nix develop --command mix test --trace
 
   windows:
-    runs-on: windows-2019
+    runs-on: windows-latest
     name: Windows OTP ${{matrix.otp}} / Elixir ${{matrix.elixir}}
     strategy:
       matrix:
         include:
-          - elixir: "1.14"
-            otp: "25"
+          - elixir: "1.17"
+            otp: "27"
     steps:
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{matrix.otp}}
           elixir-version: ${{matrix.elixir}}
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
       - name: Cache Dependencies
         id: mix-cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             deps

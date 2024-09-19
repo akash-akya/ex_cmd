@@ -75,7 +75,7 @@ func execute(workdir string, args []string, stderrConfig string) error {
 	return err
 }
 
-func runPipeline(proc *exec.Cmd, writerDone chan struct{}, stdinClose chan struct{}, kill chan<- bool, stderrConfig string){
+func runPipeline(proc *exec.Cmd, writerDone chan struct{}, stdinClose chan struct{}, kill chan<- bool, stderrConfig string) {
 	cmdInput := make(chan []byte, 1)
 	cmdOutputDemand := make(chan Packet)
 	cmdInputDemand := make(chan Packet)
@@ -183,7 +183,7 @@ func stdoutWriter(pid int, cmdStdout <-chan []byte, cmdInputDemand <-chan Packet
 
 			if len(data) > BufferSize {
 				fatal("Invalid payloadLen")
-			} else if (len(data) == 0) {
+			} else if len(data) == 0 {
 				// if we are getting EOF then we are done here
 				// there won't be anymore command coming
 				writePacketToStdout(OutputEOF, make([]byte, 0))
@@ -229,7 +229,7 @@ func safeExit(proc *exec.Cmd, procErr <-chan error, kill <-chan bool, timeout ti
 	case err := <-procErr:
 		logger.Printf("Cmd completed with err: %v", err)
 		return err
-	case <- kill:
+	case <-kill:
 		if err := proc.Process.Kill(); err != nil {
 			logger.Fatal("failed to kill process: ", err)
 			return err

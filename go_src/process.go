@@ -35,7 +35,7 @@ func startCommandPipeline(proc *exec.Cmd, input <-chan []byte, inputDemand chan<
 	return output
 }
 
-func writeToCommandStdin(cmdInput io.WriteCloser, input <- chan []byte, inputDemand chan<- Packet) {
+func writeToCommandStdin(cmdInput io.WriteCloser, input <-chan []byte, inputDemand chan<- Packet) {
 	var data []byte
 	var ok bool
 

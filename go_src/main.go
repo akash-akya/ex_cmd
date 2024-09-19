@@ -1,10 +1,10 @@
 package main
 
 import (
-	"os/exec"
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 )
 
 // Version of the odu
@@ -53,7 +53,7 @@ func main() {
 		// This shouldn't really happen in practice because we check for
 		// program existence in Elixir, before launching odu
 		logger.Printf("Command exited with error: %v", exitError)
-	} else  {
+	} else {
 		logger.Printf("Command exited with unknown errors", err)
 	}
 
