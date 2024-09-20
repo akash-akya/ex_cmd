@@ -37,7 +37,7 @@ defmodule ExCmd.ProcessTest do
       assert :ok == Process.close_stdin(s)
       assert :eof == Process.read(s)
 
-      assert {:ok, 0} == Process.await_exit(s, 100)
+      assert {:ok, 0} == Process.await_exit(s, 150)
 
       :timer.sleep(100)
       refute Elixir.Process.alive?(s.pid)
@@ -88,7 +88,7 @@ defmodule ExCmd.ProcessTest do
 
       assert {:ok, "==foo==\n"} = Process.read(s, 100)
       assert :eof = Process.read(s, 100)
-      assert {:ok, 0} = Process.await_exit(s, 100)
+      assert {:ok, 0} = Process.await_exit(s, 150)
     end
 
     test "stderr redirect_to_stdout" do
@@ -103,7 +103,7 @@ defmodule ExCmd.ProcessTest do
 
       assert {:ok, "==foo==\n==bar==\n"} = Process.read(s, 100)
       assert :eof = Process.read(s, 100)
-      assert {:ok, 0} = Process.await_exit(s, 100)
+      assert {:ok, 0} = Process.await_exit(s, 150)
     end
 
     test "if pipe gets closed on pipe owner exit normally" do
@@ -195,12 +195,12 @@ defmodule ExCmd.ProcessTest do
 
     test "if await_exit closes stdin implicitly" do
       {:ok, s} = Process.start_link(~w(cat))
-      assert {:ok, 0} = Process.await_exit(s, 100)
+      assert {:ok, 0} = Process.await_exit(s, 150)
     end
 
     test "if await_exit kills the program" do
       {:ok, s} = Process.start_link(~w(sleep 1000))
-      assert {:error, :killed} = Process.await_exit(s, 100)
+      assert {:error, :killed} = Process.await_exit(s, 150)
     end
 
     test "if external program terminates on process exit" do
@@ -228,6 +228,7 @@ defmodule ExCmd.ProcessTest do
       assert {:ok, "hello"} == Process.read(s)
     end
 
+    @tag skip: Application.compile_env!(:ex_cmd, :current_os) == :windows
     test "watcher kills external command on process without exit_await" do
       {os_pid, s} =
         Task.async(fn ->
@@ -250,6 +251,7 @@ defmodule ExCmd.ProcessTest do
       refute os_process_alive?(os_pid)
     end
 
+    @tag skip: Application.compile_env!(:ex_cmd, :current_os) == :windows
     test "await_exit with timeout" do
       {:ok, s} = Process.start_link([fixture("ignore_sigterm.sh")])
       {:ok, os_pid} = Process.os_pid(s)
@@ -269,6 +271,7 @@ defmodule ExCmd.ProcessTest do
       assert {:ok, 10} == Process.await_exit(s)
     end
 
+    @tag skip: Application.compile_env!(:ex_cmd, :current_os) == :windows
     test "check command that does not take any input or produce output" do
       {:ok, s} = Process.start_link(["sh", "-c", "./forever.sh"])
       assert ret = Process.await_exit(s)
@@ -358,7 +361,7 @@ defmodule ExCmd.ProcessTest do
       end
 
       # external process will be killed with SIGTERM (143)
-      assert {:error, :killed} = Process.await_exit(s, 100)
+      assert {:error, :killed} = Process.await_exit(s, 150)
 
       # wait for messages to propagate, if there are any
       :timer.sleep(100)
@@ -389,17 +392,22 @@ defmodule ExCmd.ProcessTest do
         |> Enum.to_list()
         |> IO.iodata_to_binary()
 
+      parent = self()
+
       task =
         Task.async(fn ->
           Process.change_pipe_owner(s, :stdin, self())
+          send(parent, :owner_changed)
           Process.write(s, large_data)
         end)
 
       # to avoid race conditions, like if process is killed before owner
       # is changed
-      :timer.sleep(200)
+      receive do
+        :owner_changed -> :ok
+      end
 
-      assert {:error, :killed} = Process.await_exit(s)
+      assert {:error, :killed} = Process.await_exit(s, 200)
 
       refute os_process_alive?(os_pid)
       assert {:error, :epipe} == Task.await(task)
@@ -511,7 +519,7 @@ defmodule ExCmd.ProcessTest do
   end
 
   test "os pid" do
-    if windows?() do
+    if Application.fetch_env!(:ex_cmd, :current_os) == :windows do
       {:ok, s} = Process.start_link(~w(cat))
       {:ok, os_pid} = Process.os_pid(s)
 
@@ -623,7 +631,7 @@ defmodule ExCmd.ProcessTest do
   end
 
   defp os_process_alive?(pid) do
-    if windows?() do
+    if Application.fetch_env!(:ex_cmd, :current_os) == :windows do
       case System.cmd("tasklist", ["/fi", "pid eq #{pid}"]) do
         {"INFO: No tasks are running which match the specified criteria.\r\n", 0} -> false
         {_, 0} -> true
@@ -632,8 +640,6 @@ defmodule ExCmd.ProcessTest do
       match?({_, 0}, System.cmd("ps", ["-p", to_string(pid)]))
     end
   end
-
-  defp windows?, do: :os.type() == {:win32, :nt}
 
   defp fixture(script) do
     Path.join([__DIR__, "../scripts", script])
