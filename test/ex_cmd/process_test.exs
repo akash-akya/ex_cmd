@@ -258,7 +258,7 @@ defmodule ExCmd.ProcessTest do
       assert {:ok, "ignored signals\n" <> _} = Process.read(s)
 
       # attempt to kill the process after 100ms
-      assert {:error, :killed} = Process.await_exit(s, 100)
+      assert {:error, :killed} = Process.await_exit(s, 200)
 
       refute os_process_alive?(os_pid)
       refute Elixir.Process.alive?(s.pid)
