@@ -577,8 +577,6 @@ defmodule ExCmd.Process do
 
   @impl true
   def handle_cast({:prepare_exit, caller, timeout}, state) do
-    IO.inspect({:cast, :prepare_exit, timeout})
-
     state = close_pipes(state, caller)
 
     case maybe_shutdown(state) do
@@ -597,8 +595,6 @@ defmodule ExCmd.Process do
 
   @impl true
   def handle_call({:change_pipe_owner, pipe_name, new_owner}, _from, state) do
-    IO.inspect({:change_pipe_owner, pipe_name, new_owner})
-
     with {:ok, pipe} <- State.pipe(state, pipe_name),
          {:ok, new_pipe} <- Pipe.set_owner(pipe, new_owner),
          {:ok, state} <- State.put_pipe(state, pipe_name, new_pipe) do
@@ -610,8 +606,6 @@ defmodule ExCmd.Process do
   end
 
   def handle_call({:close_pipe, pipe_name}, {caller, _} = from, state) do
-    IO.inspect({:close_pipe, pipe_name})
-
     with {:ok, pipe} <- State.pipe(state, pipe_name),
          {:ok, new_pipe} <- Pipe.close(pipe, caller),
          :ok <- GenServer.reply(from, :ok),
@@ -624,8 +618,6 @@ defmodule ExCmd.Process do
   end
 
   def handle_call({:read_stdout, size}, from, state) do
-    IO.inspect({:read_stdout, size})
-
     case Operations.read(state, {:read_stdout, from, size}) do
       {:noreply, state} ->
         {:noreply, state}
@@ -636,8 +628,6 @@ defmodule ExCmd.Process do
   end
 
   def handle_call({:write_stdin, binary}, from, state) do
-    IO.inspect({:write_stdin, byte_size(binary)})
-
     case State.pop_operation(state, :write_stdin) do
       {:error, :operation_not_found} ->
         case Operations.pending_input(state, from, binary) do
@@ -670,8 +660,6 @@ defmodule ExCmd.Process do
         {:exit_sequence, current_stage, timeout, kill_timeout},
         %{status: status} = state
       ) do
-    IO.inspect({:exit_sequence, current_stage, timeout, kill_timeout, status})
-
     cond do
       status != :running ->
         {:noreply, state}
@@ -698,7 +686,6 @@ defmodule ExCmd.Process do
 
   @impl true
   def handle_info({port, :eof}, %{port: port} = state) do
-    IO.inspect({port, :eof})
     state = State.set_stdout_status(state, :closed)
 
     case state.status do
@@ -733,8 +720,6 @@ defmodule ExCmd.Process do
 
   # we are only interested in Port exit signals
   def handle_info({:EXIT, port, reason}, %State{port: port} = state) when reason != :normal do
-    IO.inspect({:EXIT, port, reason})
-
     Operations.pending_callers(state)
     |> Enum.each(fn caller ->
       :ok = GenServer.reply(caller, {:error, :epipe})
@@ -753,14 +738,10 @@ defmodule ExCmd.Process do
         {:DOWN, owner_ref, :process, _pid, reason},
         %State{monitor_ref: owner_ref} = state
       ) do
-    IO.inspect({:DOWN, owner_ref, :process, reason})
-
     {:stop, reason, state}
   end
 
   def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
-    IO.inspect({:DOWN, :process, pid})
-
     state = close_pipes(state, pid)
     maybe_shutdown(state)
   end
@@ -866,8 +847,6 @@ defmodule ExCmd.Process do
   end
 
   def handle_command(:exit_status, exit_status, state) do
-    IO.inspect(cmd: {:exit_status, exit_status})
-
     ret =
       cond do
         exit_status >= 0 ->

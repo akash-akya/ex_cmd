@@ -83,7 +83,6 @@ defmodule ExCmd.Process.Proto do
 
   def write_input(port, bin) do
     {chunk, bin} = binary_split_at(bin, @max_chunk_size)
-    IO.inspect({:remaining, byte_size(bin)})
     send_command(input(), chunk, port)
     {:ok, bin}
   end
