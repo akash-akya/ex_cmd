@@ -196,7 +196,7 @@ defmodule ExCmd.Process do
   # sleep command does not watch for stdin or stdout, so closing the
   # pipe does not terminate the sleep command.
   iex> {:ok, p} = Process.start_link(~w(sleep 100000000)) # sleep indefinitely
-  iex> Process.await_exit(p, 100) # ensure `await_exit` finish within `100ms`. By default it waits for 5s
+  iex> Process.await_exit(p, 200) # ensure `await_exit` finish within `200ms`. By default it waits for 5s
   {:error, :killed} # command exit due to SIGTERM
   ```
 

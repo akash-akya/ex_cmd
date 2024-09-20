@@ -238,7 +238,7 @@ defmodule ExCmd.ProcessTest do
           # ensure the script set the correct signal handlers (handlers to ignore signal)
           assert {:ok, "ignored signals\n" <> _} = Process.read(s)
 
-          # exit without waiting for the exile process
+          # exit without waiting for the ex_cmd process
           {os_pid, s}
         end)
         |> Task.await()
@@ -303,7 +303,7 @@ defmodule ExCmd.ProcessTest do
       assert {:ok, 0} == Process.await_exit(s, 500)
     end
 
-    test "if exile process is terminated on owner exit even if pipe owner is alive" do
+    test "if ex_cmd process is terminated on owner exit even if pipe owner is alive" do
       parent = self()
 
       owner =
@@ -339,7 +339,7 @@ defmodule ExCmd.ProcessTest do
       refute Elixir.Process.alive?(s.pid)
     end
 
-    test "if exile process is *NOT* terminated on owner exit, if any pipe owner is alive" do
+    test "if ex_cmd process is *NOT* terminated on owner exit, if any pipe owner is alive" do
       parent = self()
 
       {:ok, s} = Process.start_link(~w(cat))
@@ -405,10 +405,10 @@ defmodule ExCmd.ProcessTest do
       assert {:error, :epipe} == Task.await(task)
     end
 
-    test "if owner is killed when the exile process is killed" do
+    test "if owner is killed when the ex_cmd process is killed" do
       parent = self()
 
-      # create an exile process without linking to caller
+      # create an ex_cmd process without linking to caller
       owner =
         spawn(fn ->
           assert {:ok, s} = Process.start_link(~w(cat))
@@ -418,23 +418,23 @@ defmodule ExCmd.ProcessTest do
 
       owner_ref = Elixir.Process.monitor(owner)
 
-      exile_pid = recv(owner)
+      ex_cmd_pid = recv(owner)
 
-      exile_ref = Elixir.Process.monitor(exile_pid)
+      ex_cmd_ref = Elixir.Process.monitor(ex_cmd_pid)
 
       assert Elixir.Process.alive?(owner)
-      assert Elixir.Process.alive?(exile_pid)
+      assert Elixir.Process.alive?(ex_cmd_pid)
 
-      true = Elixir.Process.exit(exile_pid, :kill)
+      true = Elixir.Process.exit(ex_cmd_pid, :kill)
 
       assert_receive {:DOWN, ^owner_ref, :process, ^owner, :killed}
-      assert_receive {:DOWN, ^exile_ref, :process, ^exile_pid, :killed}
+      assert_receive {:DOWN, ^ex_cmd_ref, :process, ^ex_cmd_pid, :killed}
     end
 
-    test "if exile process is killed when the owner is killed" do
+    test "if ex_cmd process is killed when the owner is killed" do
       parent = self()
 
-      # create an exile process without linking to caller
+      # create an ex_cmd process without linking to caller
       owner =
         spawn(fn ->
           assert {:ok, s} = Process.start_link(~w(cat))
@@ -444,17 +444,17 @@ defmodule ExCmd.ProcessTest do
 
       owner_ref = Elixir.Process.monitor(owner)
 
-      exile_pid = recv(owner)
+      ex_cmd_pid = recv(owner)
 
-      exile_ref = Elixir.Process.monitor(exile_pid)
+      ex_cmd_ref = Elixir.Process.monitor(ex_cmd_pid)
 
       assert Elixir.Process.alive?(owner)
-      assert Elixir.Process.alive?(exile_pid)
+      assert Elixir.Process.alive?(ex_cmd_pid)
 
       true = Elixir.Process.exit(owner, :kill)
 
       assert_receive {:DOWN, ^owner_ref, :process, ^owner, :killed}
-      assert_receive {:DOWN, ^exile_ref, :process, ^exile_pid, :killed}
+      assert_receive {:DOWN, ^ex_cmd_ref, :process, ^ex_cmd_pid, :killed}
     end
   end
 
@@ -508,6 +508,24 @@ defmodule ExCmd.ProcessTest do
 
     # There must be a read before write completes
     assert {:read, _} = hd(events)
+  end
+
+  test "os pid" do
+    if windows?() do
+      {:ok, s} = Process.start_link(~w(cat))
+      {:ok, os_pid} = Process.os_pid(s)
+
+      {output, 0} = System.cmd("tasklist", ["/fi", "pid eq #{os_pid}"])
+      assert String.contains?(output, "cat.exe")
+      assert {:ok, 0} = Process.await_exit(s)
+    else
+      {:ok, s} = Process.start_link(~w(cat))
+      {:ok, os_pid} = Process.os_pid(s)
+
+      {outout, 0} = System.cmd("sh", ["-c", "ps -o args -p #{os_pid} | tail -1"])
+      assert System.find_executable("cat") == String.trim(outout)
+      assert {:ok, 0} = Process.await_exit(s)
+    end
   end
 
   # this test does not work properly in linux
@@ -605,8 +623,17 @@ defmodule ExCmd.ProcessTest do
   end
 
   defp os_process_alive?(pid) do
-    match?({_, 0}, System.cmd("ps", ["-p", to_string(pid)]))
+    if windows?() do
+      case System.cmd("tasklist", ["/fi", "pid eq #{pid}"]) do
+        {"INFO: No tasks are running which match the specified criteria.\r\n", 0} -> false
+        {_, 0} -> true
+      end
+    else
+      match?({_, 0}, System.cmd("ps", ["-p", to_string(pid)]))
+    end
   end
+
+  defp windows?, do: :os.type() == {:win32, :nt}
 
   defp fixture(script) do
     Path.join([__DIR__, "../scripts", script])
