@@ -161,7 +161,7 @@ defmodule ExCmd.Process.Proto do
 
   defp start_odu_port(odu_path, cmd_with_args, opts) do
     args = build_odu_params(opts) ++ ["--" | cmd_with_args]
-    options = [:use_stdio, :exit_status, :binary, :hide, :eof, {:packet, 4}, args: args]
+    options = [:use_stdio, :exit_status, :binary, :hide, {:packet, 4}, args: args]
     Port.open({:spawn_executable, odu_path}, options)
   end
 

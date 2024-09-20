@@ -725,9 +725,12 @@ defmodule ExCmd.Process do
       :ok = GenServer.reply(caller, {:error, :epipe})
     end)
 
-    send(state.owner, {state.exit_ref, {:error, reason}})
-    state = State.set_status(state, {:exit, {:error, reason}})
+    state = set_exit_status(state, {:error, reason})
 
+    maybe_shutdown(state)
+  end
+
+  def handle_info({:EXIT, port, :normal}, %State{port: port} = state) do
     maybe_shutdown(state)
   end
 
@@ -847,25 +850,15 @@ defmodule ExCmd.Process do
   end
 
   def handle_command(:exit_status, exit_status, state) do
-    ret =
-      cond do
-        exit_status >= 0 ->
-          {:exit, exit_status}
+    Operations.pending_callers(state)
+    |> Enum.each(fn caller ->
+      :ok = GenServer.reply(caller, {:error, :epipe})
+    end)
 
-        exit_status == -1 ->
-          {:exit, {:error, :killed}}
-      end
-
-    state = State.set_status(state, ret)
-
-    if state.stdout_status == :closed do
-      Operations.pending_callers(state)
-      |> Enum.each(fn caller ->
-        :ok = GenServer.reply(caller, {:error, :epipe})
-      end)
-
-      send(state.owner, {state.exit_ref, ret})
-    end
+    state =
+      state
+      |> State.set_stdout_status(:closed)
+      |> set_exit_status({:ok, exit_status})
 
     maybe_shutdown(state)
   end
@@ -906,5 +899,24 @@ defmodule ExCmd.Process do
       kill_timeout = min(50, timeout - 50)
       {timeout - kill_timeout, kill_timeout}
     end
+  end
+
+  @spec set_exit_status(State.t(), {:error, term} | {:ok, integer}) :: State.t()
+  defp set_exit_status(state, status) do
+    status =
+      case status do
+        {:error, reason} ->
+          {:error, reason}
+
+        {:ok, -1} ->
+          {:error, :killed}
+
+        {:ok, exit_status} when is_integer(exit_status) and exit_status >= 0 ->
+          {:ok, exit_status}
+      end
+
+    send(state.owner, {state.exit_ref, status})
+
+    State.set_status(state, {:exit, status})
   end
 end
