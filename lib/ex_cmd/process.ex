@@ -301,7 +301,7 @@ defmodule ExCmd.Process do
   @type caller :: GenServer.from()
 
   @default_opts [env: [], stderr: :console, log: nil]
-  @default_buffer_size 65_535
+  @default_buffer_size 65_531
 
   @doc false
   defmacro send_input, do: 1
@@ -449,7 +449,7 @@ defmodule ExCmd.Process do
   """
   @spec read(t, pos_integer()) :: {:ok, iodata} | :eof | {:error, any()}
   def read(process, max_size \\ @default_buffer_size)
-      when is_integer(max_size) and max_size > 0 do
+      when is_integer(max_size) and max_size > 0 and max_size <= @default_buffer_size do
     GenServer.call(process.pid, {:read_stdout, max_size}, :infinity)
   end
 

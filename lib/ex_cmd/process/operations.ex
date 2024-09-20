@@ -234,10 +234,10 @@ defmodule ExCmd.Process.Operations do
           {:ok, read_operation()} | {:error, :invalid_operation}
   defp validate_read_operation(operation) do
     case operation do
-      {:read_stdout, _from, size} when is_integer(size) and size >= 0 ->
+      {:read_stdout, _from, size} when is_integer(size) and size >= 0 and size <= 65_531 ->
         {:ok, operation}
 
-      {:read_stderr, _from, size} when is_integer(size) and size >= 0 ->
+      {:read_stderr, _from, size} when is_integer(size) and size >= 0 and size <= 65_531 ->
         {:ok, operation}
 
       _ ->

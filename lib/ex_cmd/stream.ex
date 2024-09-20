@@ -224,13 +224,23 @@ defmodule ExCmd.Stream do
         {:running, {:ok, _status}, {:error, :epipe}} when ignore_epipe ->
           {:exit, {:status, 0}}
 
+        # :killed might be due to SIGPIPE / EPIPE
+        {:running, {:error, :killed}, {:error, :epipe}} when ignore_epipe ->
+          {:exit, {:status, 0}}
+
         # if reader exit early and there is no pending write or if
         # there is no writer
         {:running, {:ok, _status}, :ok} when ignore_epipe ->
           {:exit, {:status, 0}}
 
+        {:running, {:error, :killed}, :ok} when ignore_epipe ->
+          {:exit, {:status, 0}}
+
         # if we get epipe from writer then raise that error, and ignore exit status
         {:running, {:ok, _status}, {:error, :epipe}} when ignore_epipe == false ->
+          {:exit, :epipe}
+
+        {:running, {:error, :killed}, {:error, :epipe}} when ignore_epipe == false ->
           {:exit, :epipe}
 
         # Normal exit success case
@@ -264,7 +274,7 @@ defmodule ExCmd.Stream do
   defp normalize_max_chunk_size(max_chunk_size) do
     case max_chunk_size do
       nil ->
-        {:ok, 65_536}
+        {:ok, 65_531}
 
       max_chunk_size when is_integer(max_chunk_size) and max_chunk_size > 0 ->
         {:ok, max_chunk_size}

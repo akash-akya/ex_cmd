@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"io"
 	"os"
 	"os/exec"
@@ -71,6 +72,7 @@ func readCommandStdout(cmdOutput io.ReadCloser, outputDemand <-chan Packet, outp
 	var buf [BufferSize]byte
 	var packet Packet
 	var ok bool
+	var chunk_size uint32
 
 	cmdOutputClosed := false
 
@@ -100,8 +102,16 @@ func readCommandStdout(cmdOutput io.ReadCloser, outputDemand <-chan Packet, outp
 				fatal("asking output while command output is closed")
 			}
 
+			if len(packet.data) == 4 {
+				chunk_size = binary.BigEndian.Uint32(packet.data)
+			} else {
+				fatal("invalid read size")
+			}
+
+			logger.Printf("read with max size: %v", chunk_size)
+
 			// blocking
-			bytesRead, readErr := cmdOutput.Read(buf[:])
+			bytesRead, readErr := cmdOutput.Read(buf[:chunk_size])
 			if bytesRead > 0 {
 				output <- buf[:bytesRead]
 			} else if readErr == io.EOF || bytesRead == 0 {

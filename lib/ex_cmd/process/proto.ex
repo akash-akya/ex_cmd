@@ -56,8 +56,8 @@ defmodule ExCmd.Process.Proto do
     end
   end
 
-  def read(port, _max_size) do
-    send_command(send_output(), <<>>, port)
+  def read(port, max_size) when is_integer(max_size) and max_size > 0 and max_size <= 65_536 do
+    send_command(send_output(), <<max_size::big-signed-integer-32>>, port)
     {:error, :eagain}
   end
 
@@ -68,7 +68,7 @@ defmodule ExCmd.Process.Proto do
       Enum.map_join(env, fn {key, value} ->
         entry = String.trim(key) <> "=" <> String.trim(value)
 
-        if byte_size(entry) > 65_536 do
+        if byte_size(entry) > 65_531 do
           raise ArgumentError, message: "Env entry length exceeds limit"
         end
 
