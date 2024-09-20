@@ -236,7 +236,7 @@ defmodule ExCmd.ProcessTest do
           assert os_process_alive?(os_pid)
 
           # ensure the script set the correct signal handlers (handlers to ignore signal)
-          assert {:ok, "ignored signals\n"} = Process.read(s)
+          assert {:ok, "ignored signals\n" <> _} = Process.read(s)
 
           # exit without waiting for the exile process
           {os_pid, s}
@@ -271,7 +271,9 @@ defmodule ExCmd.ProcessTest do
 
     test "check command that does not take any input or produce output" do
       {:ok, s} = Process.start_link(["sh", "-c", "./forever.sh"])
-      assert {:error, :killed} == Process.await_exit(s)
+      assert ret = Process.await_exit(s)
+      # process might die with different reason due to race condition
+      assert ret in [{:error, :killed}, {:ok, 127}]
     end
 
     test "writing binary larger than pipe buffer size" do
