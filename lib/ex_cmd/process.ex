@@ -196,7 +196,7 @@ defmodule ExCmd.Process do
   # sleep command does not watch for stdin or stdout, so closing the
   # pipe does not terminate the sleep command.
   iex> {:ok, p} = Process.start_link(~w(sleep 100000000)) # sleep indefinitely
-  iex> Process.await_exit(p, 200) # ensure `await_exit` finish within `200ms`. By default it waits for 5s
+  iex> Process.await_exit(p, 500) # ensure `await_exit` finish within `500ms`. By default it waits for 5s
   {:error, :killed} # command exit due to SIGTERM
   ```
 
@@ -205,9 +205,9 @@ defmodule ExCmd.Process do
   Run a command without any input or output
 
   ```
-  iex> {:ok, p} = Process.start_link(["sh", "-c", "exit 1"])
+  iex> {:ok, p} = Process.start_link(["sh", "-c", "exit 2"])
   iex> Process.await_exit(p)
-  {:ok, 1}
+  {:ok, 2}
   ```
 
   Single process reading and writing to the command
@@ -670,7 +670,13 @@ defmodule ExCmd.Process do
 
       current_stage == :kill ->
         :ok = Proto.kill(state.port)
-        Elixir.Process.send_after(self(), {:exit_sequence, :stop, timeout, kill_timeout}, timeout)
+
+        Elixir.Process.send_after(
+          self(),
+          {:exit_sequence, :stop, timeout, kill_timeout},
+          kill_timeout
+        )
+
         {:noreply, state}
 
       current_stage == :stop ->
@@ -686,8 +692,6 @@ defmodule ExCmd.Process do
 
   @impl true
   def handle_info({port, :eof}, %{port: port} = state) do
-    state = State.set_stdout_status(state, :closed)
-
     case state.status do
       {:exit, exit} ->
         Operations.pending_callers(state)
@@ -756,9 +760,7 @@ defmodule ExCmd.Process do
       |> Map.values()
       |> Enum.count(&Pipe.open?/1)
 
-    if open_pipes_count == 0 &&
-         !(state.status in [:init, :running]) &&
-         state.stdout_status == :closed do
+    if open_pipes_count == 0 && !(state.status in [:init, :running]) do
       {:stop, :normal, state}
     else
       {:noreply, state}
@@ -784,7 +786,6 @@ defmodule ExCmd.Process do
       | port: port,
         os_pid: os_pid,
         status: :running,
-        stdout_status: :open,
         pipes: %{
           stdin: Pipe.new(:stdin, port, state.owner),
           stdout: Pipe.new(:stdout, port, state.owner),
@@ -855,11 +856,7 @@ defmodule ExCmd.Process do
       :ok = GenServer.reply(caller, {:error, :epipe})
     end)
 
-    state =
-      state
-      |> State.set_stdout_status(:closed)
-      |> set_exit_status({:ok, exit_status})
-
+    state = set_exit_status(state, {:ok, exit_status})
     maybe_shutdown(state)
   end
 
@@ -891,12 +888,12 @@ defmodule ExCmd.Process do
   defp divide_timeout(timeout) when timeout < 10, do: {0, 0}
 
   defp divide_timeout(timeout) do
-    timeout = timeout - 10
+    timeout = timeout - 50
 
     if timeout < 50 do
       {timeout, 0}
     else
-      kill_timeout = min(50, timeout - 50)
+      kill_timeout = min(10, timeout - 50)
       {timeout - kill_timeout, kill_timeout}
     end
   end

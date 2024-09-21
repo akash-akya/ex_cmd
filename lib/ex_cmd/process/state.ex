@@ -27,7 +27,6 @@ defmodule ExCmd.Process.State do
           port: port(),
           os_pid: pos_integer,
           pipes: pipes,
-          stdout_status: :open | :closed,
           status: status,
           stderr: stderr_mode,
           operations: Operations.t(),
@@ -41,7 +40,6 @@ defmodule ExCmd.Process.State do
     :port,
     :os_pid,
     :pipes,
-    :stdout_status,
     :status,
     :stderr,
     :operations,
@@ -100,10 +98,5 @@ defmodule ExCmd.Process.State do
   @spec set_status(State.t(), status) :: State.t()
   def set_status(state, status) do
     %State{state | status: status}
-  end
-
-  @spec set_stdout_status(State.t(), :open | :closed) :: State.t()
-  def set_stdout_status(state, status) do
-    %State{state | stdout_status: status}
   end
 end

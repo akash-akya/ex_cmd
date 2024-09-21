@@ -122,7 +122,7 @@ defmodule ExCmd do
   With stderr set to :redirect_to_stdout
 
   ```
-  iex> ExCmd.stream!(["sh", "-c", "echo foo; echo bar >> /dev/stderr"], stderr: :redirect_to_stdout)
+  iex> ExCmd.stream!(["sh", "-c", "echo foo; echo bar >&2"], stderr: :redirect_to_stdout)
   ...> |> Enum.into("")
   "foo\nbar\n"
   ```
@@ -130,7 +130,7 @@ defmodule ExCmd do
   With stderr set to :disable
 
   ```
-  iex> ExCmd.stream!(["sh", "-c", "echo foo; echo bar >> /dev/stderr"], stderr: :disable)
+  iex> ExCmd.stream!(["sh", "-c", "echo foo; echo bar >&2"], stderr: :disable)
   ...> |> Enum.to_list()
   ["foo\n"]
   ```
@@ -224,7 +224,7 @@ defmodule ExCmd do
   Stream with stderr redirected to stdout
 
   ```
-  ExCmd.stream!(["sh", "-c", "echo foo; echo bar >> /dev/stderr"], stderr: :redirect_to_stdout)
+  ExCmd.stream!(["sh", "-c", "echo foo; echo bar >&2"], stderr: :redirect_to_stdout)
   |> Stream.map(&IO.write/1)
   |> Stream.run()
   ```

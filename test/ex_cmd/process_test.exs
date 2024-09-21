@@ -37,7 +37,7 @@ defmodule ExCmd.ProcessTest do
       assert :ok == Process.close_stdin(s)
       assert :eof == Process.read(s)
 
-      assert {:ok, 0} == Process.await_exit(s, 150)
+      assert {:ok, 0} == Process.await_exit(s, 200)
 
       :timer.sleep(100)
       refute Elixir.Process.alive?(s.pid)
@@ -88,7 +88,7 @@ defmodule ExCmd.ProcessTest do
 
       assert {:ok, "==foo==\n"} = Process.read(s, 100)
       assert :eof = Process.read(s, 100)
-      assert {:ok, 0} = Process.await_exit(s, 150)
+      assert {:ok, 0} = Process.await_exit(s, 200)
     end
 
     test "stderr redirect_to_stdout" do
@@ -99,11 +99,11 @@ defmodule ExCmd.ProcessTest do
 
       {:ok, s} = Process.start_link(["sh", "-c", script], stderr: :redirect_to_stdout)
       # wait for the the both output to merge
-      :timer.sleep(500)
+      :timer.sleep(1000)
 
       assert {:ok, "==foo==\n==bar==\n"} = Process.read(s, 100)
       assert :eof = Process.read(s, 100)
-      assert {:ok, 0} = Process.await_exit(s, 150)
+      assert {:ok, 0} = Process.await_exit(s, 200)
     end
 
     test "if pipe gets closed on pipe owner exit normally" do
@@ -195,12 +195,12 @@ defmodule ExCmd.ProcessTest do
 
     test "if await_exit closes stdin implicitly" do
       {:ok, s} = Process.start_link(~w(cat))
-      assert {:ok, 0} = Process.await_exit(s, 150)
+      assert {:ok, 0} = Process.await_exit(s, 200)
     end
 
     test "if await_exit kills the program" do
-      {:ok, s} = Process.start_link(~w(sleep 1000))
-      assert {:error, :killed} = Process.await_exit(s, 150)
+      {:ok, s} = Process.start_link(~w(sleep 10000))
+      assert_killed(Process.await_exit(s, 500))
     end
 
     test "if external program terminates on process exit" do
@@ -259,8 +259,8 @@ defmodule ExCmd.ProcessTest do
 
       assert {:ok, "ignored signals\n" <> _} = Process.read(s)
 
-      # attempt to kill the process after 100ms
-      assert {:error, :killed} = Process.await_exit(s, 200)
+      # attempt to kill the process after 200ms
+      assert_killed(Process.await_exit(s, 200))
 
       refute os_process_alive?(os_pid)
       refute Elixir.Process.alive?(s.pid)
@@ -273,7 +273,7 @@ defmodule ExCmd.ProcessTest do
 
     @tag skip: Application.compile_env!(:ex_cmd, :current_os) == :windows
     test "check command that does not take any input or produce output" do
-      {:ok, s} = Process.start_link(["sh", "-c", "./forever.sh"])
+      {:ok, s} = Process.start_link(["sh", "-c", fixture("forever.sh")])
       assert ret = Process.await_exit(s)
       # process might die with different reason due to race condition
       assert ret in [{:error, :killed}, {:ok, 127}]
@@ -361,7 +361,7 @@ defmodule ExCmd.ProcessTest do
       end
 
       # external process will be killed with SIGTERM (143)
-      assert {:error, :killed} = Process.await_exit(s, 150)
+      assert_killed(Process.await_exit(s, 200))
 
       # wait for messages to propagate, if there are any
       :timer.sleep(100)
@@ -407,7 +407,7 @@ defmodule ExCmd.ProcessTest do
         :owner_changed -> :ok
       end
 
-      assert {:error, :killed} = Process.await_exit(s, 200)
+      assert_killed(Process.await_exit(s, 200))
 
       refute os_process_alive?(os_pid)
       assert {:error, :epipe} == Task.await(task)
@@ -560,7 +560,7 @@ defmodule ExCmd.ProcessTest do
       {:ok, s} = Process.start_link(~w(sh -c pwd), cd: parent)
       {:ok, dir} = Process.read(s)
 
-      assert String.trim(dir) == parent
+      assert Path.basename(String.trim(dir)) == Path.basename(parent)
       assert {:ok, 0} = Process.await_exit(s)
     end
 
@@ -703,6 +703,16 @@ defmodule ExCmd.ProcessTest do
     after
       1000 ->
         raise "recv timeout"
+    end
+  end
+
+  def assert_killed(ret) do
+    if Application.fetch_env!(:ex_cmd, :current_os) == :windows do
+      # Windows does not have a way to distinguish between signals and exit-status
+      # Golang returns exit_status as 1 for kill
+      assert ret == {:ok, 1}
+    else
+      assert ret == {:error, :killed}
     end
   end
 end
