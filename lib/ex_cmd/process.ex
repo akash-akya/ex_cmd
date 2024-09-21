@@ -195,8 +195,8 @@ defmodule ExCmd.Process do
   ```
   # sleep command does not watch for stdin or stdout, so closing the
   # pipe does not terminate the sleep command.
-  iex> {:ok, p} = Process.start_link(~w(sleep 100000000)) # sleep indefinitely
-  iex> Process.await_exit(p, 500) # ensure `await_exit` finish within `500ms`. By default it waits for 5s
+  iex> {:ok, p} = Process.start_link(~w(sleep 100000000), log: :stderr) # sleep indefinitely
+  iex> Process.await_exit(p, 1000) # ensure `await_exit` finish within `1000ms`. By default it waits for 5s
   {:error, :killed} # command exit due to SIGTERM
   ```
 
@@ -214,16 +214,16 @@ defmodule ExCmd.Process do
 
   ```
   # bc is a calculator, which reads from stdin and writes output to stdout
-  iex> {:ok, p} = Process.start_link(~w(bc))
-  iex> Process.write(p, "1 + 1\n") # there must be new-line to indicate the end of the input line
+  iex> {:ok, p} = Process.start_link(~w(cat))
+  iex> Process.write(p, "hello\n") # there must be new-line to indicate the end of the input line
   :ok
   iex> Process.read(p)
-  {:ok, "2\n"}
-  iex> Process.write(p, "2 * 10 + 1\n")
+  {:ok, "hello\n"}
+  iex> Process.write(p, "world\n")
   :ok
   iex> Process.read(p)
-  {:ok, "21\n"}
-  # We must close stdin to signal the `bc` command that we are done.
+  {:ok, "world\n"}
+  # We must close stdin to signal the command that we are done.
   # since `await_exit` implicitly closes the pipes, in this case we don't have to
   iex> Process.await_exit(p)
   {:ok, 0}
@@ -302,6 +302,10 @@ defmodule ExCmd.Process do
 
   @default_opts [env: [], stderr: :console, log: nil]
   @default_buffer_size 65_531
+
+  # we should ensure we have enough time to get exit_status from the
+  # middleware
+  @exit_status_buffer_timeout 50
 
   @doc false
   defmacro send_input, do: 1
@@ -506,8 +510,10 @@ defmodule ExCmd.Process do
         raise ArgumentError,
               "task #{inspect(process)} exit status can only be queried by owner but was queried from #{inspect(self())}"
 
-      timeout != :infinity && !is_integer(timeout) ->
-        raise ArgumentError, "timeout must be an integer or :infinity"
+      (timeout != :infinity && !is_integer(timeout)) ||
+          (is_integer(timeout) && timeout < @exit_status_buffer_timeout) ->
+        raise ArgumentError,
+              "timeout must be an integer greater than #{@exit_status_buffer_timeout} or :infinity "
 
       true ->
         :ok
@@ -519,7 +525,7 @@ defmodule ExCmd.Process do
       else
         # process exit steps should finish before receive timeout exceeds
         # receive timeout is max allowed time for the `await_exit` call to block
-        max(50, timeout)
+        max(@exit_status_buffer_timeout, timeout)
       end
 
     :ok = GenServer.cast(pid, {:prepare_exit, owner, graceful_exit_timeout})
@@ -577,6 +583,7 @@ defmodule ExCmd.Process do
 
   @impl true
   def handle_cast({:prepare_exit, caller, timeout}, state) do
+    Logger.debug("prepare_exit: #{timeout}")
     state = close_pipes(state, caller)
 
     case maybe_shutdown(state) do
@@ -660,6 +667,8 @@ defmodule ExCmd.Process do
         {:exit_sequence, current_stage, timeout, kill_timeout},
         %{status: status} = state
       ) do
+    Logger.debug("exit_sequence, #{current_stage} #{timeout} #{kill_timeout}, #{inspect(state)}")
+
     cond do
       status != :running ->
         {:noreply, state}
@@ -690,51 +699,42 @@ defmodule ExCmd.Process do
     handle_command(tag, bin, state)
   end
 
-  @impl true
-  def handle_info({port, :eof}, %{port: port} = state) do
-    case state.status do
-      {:exit, exit} ->
-        Operations.pending_callers(state)
-        |> Enum.each(fn caller ->
-          :ok = GenServer.reply(caller, {:error, :epipe})
-        end)
-
-        case exit do
-          {:error, reason} ->
-            send(state.owner, {state.exit_ref, {:error, reason}})
-
-          exit_status when is_integer(exit_status) ->
-            send(state.owner, {state.exit_ref, {:ok, exit_status}})
-        end
-
-      _ ->
-        :ok
-    end
-
-    maybe_shutdown(state)
-  end
-
   def handle_info({port, {:exit_status, odu_exit_status}}, %{port: port} = state) do
-    if odu_exit_status != 0 do
-      raise "Failed during command execution"
-    end
+    Logger.debug("port exit with status #{odu_exit_status} state: #{inspect(state)}")
+
+    state =
+      cond do
+        odu_exit_status != 0 ->
+          state
+          |> cancel_pending_actions()
+          |> set_exit_status({:error, :port_abnormal_exit})
+
+        state.status in [:init, :running] ->
+          state
+          |> cancel_pending_actions()
+          |> set_exit_status({:error, :premature_port_exit})
+
+        true ->
+          state
+      end
 
     maybe_shutdown(state)
   end
 
   # we are only interested in Port exit signals
   def handle_info({:EXIT, port, reason}, %State{port: port} = state) when reason != :normal do
-    Operations.pending_callers(state)
-    |> Enum.each(fn caller ->
-      :ok = GenServer.reply(caller, {:error, :epipe})
-    end)
+    Logger.debug("port exit with error state: #{inspect(state)}")
 
-    state = set_exit_status(state, {:error, reason})
+    state =
+      state
+      |> cancel_pending_actions()
+      |> set_exit_status({:error, reason})
 
     maybe_shutdown(state)
   end
 
   def handle_info({:EXIT, port, :normal}, %State{port: port} = state) do
+    Logger.debug("port exit normally state: #{inspect(state)}")
     maybe_shutdown(state)
   end
 
@@ -745,22 +745,27 @@ defmodule ExCmd.Process do
         {:DOWN, owner_ref, :process, _pid, reason},
         %State{monitor_ref: owner_ref} = state
       ) do
+    Logger.debug("process owner exit: state: #{inspect(state)}")
     {:stop, reason, state}
   end
 
   def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
+    Logger.debug("pipe owner exit: state: #{inspect(state)}")
     state = close_pipes(state, pid)
     maybe_shutdown(state)
   end
 
   @spec maybe_shutdown(State.t()) :: {:stop, :normal, State.t()} | {:noreply, State.t()}
   defp maybe_shutdown(state) do
+    Logger.debug("maybe_shutdown: state: #{inspect(state)}")
+
     open_pipes_count =
       state.pipes
       |> Map.values()
       |> Enum.count(&Pipe.open?/1)
 
     if open_pipes_count == 0 && !(state.status in [:init, :running]) do
+      Logger.debug("shutting down state: #{inspect(state)}")
       {:stop, :normal, state}
     else
       {:noreply, state}
@@ -851,12 +856,11 @@ defmodule ExCmd.Process do
   end
 
   def handle_command(:exit_status, exit_status, state) do
-    Operations.pending_callers(state)
-    |> Enum.each(fn caller ->
-      :ok = GenServer.reply(caller, {:error, :epipe})
-    end)
+    state =
+      state
+      |> cancel_pending_actions()
+      |> set_exit_status({:ok, exit_status})
 
-    state = set_exit_status(state, {:ok, exit_status})
     maybe_shutdown(state)
   end
 
@@ -885,15 +889,14 @@ defmodule ExCmd.Process do
   end
 
   @spec divide_timeout(non_neg_integer) :: {non_neg_integer, non_neg_integer}
-  defp divide_timeout(timeout) when timeout < 10, do: {0, 0}
-
-  defp divide_timeout(timeout) do
-    timeout = timeout - 50
+  defp divide_timeout(timeout) when timeout > @exit_status_buffer_timeout do
+    timeout = timeout - @exit_status_buffer_timeout
 
     if timeout < 50 do
-      {timeout, 0}
+      {0, 0}
     else
-      kill_timeout = min(10, timeout - 50)
+      # we need at least 50s
+      kill_timeout = min(50, timeout - 50)
       {timeout - kill_timeout, kill_timeout}
     end
   end
@@ -908,12 +911,26 @@ defmodule ExCmd.Process do
         {:ok, -1} ->
           {:error, :killed}
 
+        # assume unknown status as `killed` for now
+        {:ok, -2} ->
+          {:error, :killed}
+
         {:ok, exit_status} when is_integer(exit_status) and exit_status >= 0 ->
           {:ok, exit_status}
       end
 
     send(state.owner, {state.exit_ref, status})
-
     State.set_status(state, {:exit, status})
+  end
+
+  @spec cancel_pending_actions(State.t()) :: State.t()
+  defp cancel_pending_actions(state) do
+    {state, callers} = Operations.pop_pending_callers(state)
+
+    Enum.each(callers, fn caller ->
+      :ok = GenServer.reply(caller, {:error, :epipe})
+    end)
+
+    state
   end
 end

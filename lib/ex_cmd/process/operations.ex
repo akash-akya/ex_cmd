@@ -138,14 +138,25 @@ defmodule ExCmd.Process.Operations do
     end
   end
 
-  def pending_callers(state) do
-    state.operations
-    |> Map.from_struct()
-    |> Enum.map(fn
-      {_op_name, {_, {_caller, _} = from, _}} -> from
-      _ -> false
-    end)
-    |> Enum.filter(& &1)
+  @spec pop_pending_callers(State.t()) :: {State.t(), [pid]}
+  def pop_pending_callers(state) do
+    operations = Map.from_struct(state.operations)
+
+    {state, pending_callers} =
+      Enum.reduce(operations, {state, []}, fn {name, _}, {state, ops} ->
+        case State.pop_operation(state, name) do
+          {:error, :operation_not_found} ->
+            {state, ops}
+
+          {:ok, {_, :demand, _}, state} ->
+            {state, ops}
+
+          {:ok, {_, {_pid, _} = caller, _}, state} ->
+            {state, [caller | ops]}
+        end
+      end)
+
+    {state, pending_callers}
   end
 
   @spec match_pending_operation(State.t(), Pipe.name()) ::

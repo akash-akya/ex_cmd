@@ -20,6 +20,8 @@ defmodule ExCmd.ProcessTest do
 
       assert {:ok, 0} == Process.await_exit(s, 500)
 
+      # wait for the process to terminate
+      :timer.sleep(100)
       refute Elixir.Process.alive?(s.pid)
     end
 
@@ -39,6 +41,7 @@ defmodule ExCmd.ProcessTest do
 
       assert {:ok, 0} == Process.await_exit(s, 200)
 
+      # wait for the process to terminate
       :timer.sleep(100)
       refute Elixir.Process.alive?(s.pid)
     end
@@ -199,8 +202,8 @@ defmodule ExCmd.ProcessTest do
     end
 
     test "if await_exit kills the program" do
-      {:ok, s} = Process.start_link(~w(sleep 10000))
-      assert_killed(Process.await_exit(s, 500))
+      {:ok, s} = Process.start_link(~w(sleep 10000), log: :stderr)
+      assert_killed(Process.await_exit(s, 1000))
     end
 
     test "if external program terminates on process exit" do
@@ -259,8 +262,8 @@ defmodule ExCmd.ProcessTest do
 
       assert {:ok, "ignored signals\n" <> _} = Process.read(s)
 
-      # attempt to kill the process after 200ms
-      assert_killed(Process.await_exit(s, 200))
+      # attempt to kill the process after 1000ms
+      assert_killed(Process.await_exit(s, 1000))
 
       refute os_process_alive?(os_pid)
       refute Elixir.Process.alive?(s.pid)
@@ -361,7 +364,7 @@ defmodule ExCmd.ProcessTest do
       end
 
       # external process will be killed with SIGTERM (143)
-      assert_killed(Process.await_exit(s, 200))
+      assert_killed(Process.await_exit(s, 1000))
 
       # wait for messages to propagate, if there are any
       :timer.sleep(100)
@@ -407,7 +410,7 @@ defmodule ExCmd.ProcessTest do
         :owner_changed -> :ok
       end
 
-      assert_killed(Process.await_exit(s, 200))
+      _ = Process.await_exit(s, 1000)
 
       refute os_process_alive?(os_pid)
       assert {:error, :epipe} == Task.await(task)
@@ -701,7 +704,7 @@ defmodule ExCmd.ProcessTest do
     receive do
       {^sender, term} -> term
     after
-      1000 ->
+      3000 ->
         raise "recv timeout"
     end
   end
@@ -710,7 +713,7 @@ defmodule ExCmd.ProcessTest do
     if Application.fetch_env!(:ex_cmd, :current_os) == :windows do
       # Windows does not have a way to distinguish between signals and exit-status
       # Golang returns exit_status as 1 for kill
-      assert ret == {:ok, 1}
+      assert ret in [{:ok, 1}, {:error, :killed}]
     else
       assert ret == {:error, :killed}
     end

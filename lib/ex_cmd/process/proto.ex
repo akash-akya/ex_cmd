@@ -88,25 +88,11 @@ defmodule ExCmd.Process.Proto do
   end
 
   def close(port, :stdin) when is_port(port) do
-    try do
-      send_command(close_input(), <<>>, port)
-    rescue
-      # this is needed because the port might have already been closed
-      # when we try to close
-      ArgumentError ->
-        :ok
-    end
+    send_command(close_input(), <<>>, port)
   end
 
   def close(port, :stdout) when is_port(port) do
-    try do
-      send_command(close_output(), <<>>, port)
-    rescue
-      # this is needed because the port might have already been closed
-      # when we try to close
-      ArgumentError ->
-        :ok
-    end
+    send_command(close_output(), <<>>, port)
   end
 
   def close(port, stream) when is_port(port) do
@@ -115,14 +101,7 @@ defmodule ExCmd.Process.Proto do
   end
 
   def kill(port) do
-    try do
-      send_command(kill(), <<>>, port)
-    rescue
-      # this is needed because the port might have already been closed
-      # when we try to close
-      ArgumentError ->
-        :ok
-    end
+    send_command(kill(), <<>>, port)
   end
 
   def start(cmd_with_args, env, odu_opts) do
@@ -148,8 +127,20 @@ defmodule ExCmd.Process.Proto do
 
   defp send_command(tag, bin, port) do
     bin = <<tag::unsigned-integer-8, bin::binary>>
-    true = Port.command(port, bin)
-    :ok
+
+    try do
+      true = Port.command(port, bin)
+      :ok
+    rescue
+      # this is needed because the port might have already been closed
+      # when we try to close
+      error in [ArgumentError] ->
+        if Port.info(port) == nil do
+          :ok
+        else
+          reraise error, __STACKTRACE__
+        end
+    end
   end
 
   defp binary_split_at(bin, pos) when byte_size(bin) <= pos, do: {bin, <<>>}

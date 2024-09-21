@@ -70,9 +70,11 @@ func execute(workdir string, args []string, stderrConfig string) error {
 	if exitError, ok := err.(*exec.ExitError); ok {
 		writeCmdExitCode(exitError.ExitCode())
 		return nil
+	} else {
+		// unknown error
+		writeCmdExitCode(-2)
+		return err
 	}
-
-	return err
 }
 
 func runPipeline(proc *exec.Cmd, writerDone chan struct{}, stdinClose chan struct{}, kill chan<- bool, stderrConfig string) {
@@ -235,14 +237,26 @@ func safeExit(proc *exec.Cmd, procErr <-chan error, kill <-chan bool, timeout ti
 			return err
 		}
 		logger.Println("process killed by user signal")
-		return <-procErr
+
+		select {
+		case err := <-procErr:
+			return err
+		default:
+			return errors.New("Killed")
+		}
 	case <-time.After(timeout):
 		if err := proc.Process.Kill(); err != nil {
 			logger.Fatal("failed to kill process: ", err)
 			return err
 		}
 		logger.Println("process killed as exit timeout reached")
-		return <-procErr
+
+		select {
+		case err := <-procErr:
+			return err
+		default:
+			return errors.New("Killed")
+		}
 	}
 }
 
