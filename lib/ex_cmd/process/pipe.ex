@@ -5,25 +5,23 @@ defmodule ExCmd.Process.Pipe do
 
   @type name :: ExCmd.Process.pipe_name()
 
-  @type fd :: non_neg_integer()
-
   @type t :: %__MODULE__{
           name: name,
-          fd: pos_integer() | nil,
+          port: port | nil,
           monitor_ref: reference() | nil,
           owner: pid | nil,
           status: :open | :closed
         }
 
-  defstruct [:name, :fd, :monitor_ref, :owner, status: :init]
+  defstruct [:name, :port, :monitor_ref, :owner, status: :init]
 
   alias __MODULE__
 
-  @spec new(name, pos_integer, pid) :: t
-  def new(name, fd, owner) do
+  @spec new(name, port, pid) :: t
+  def new(name, port, owner) do
     if name in [:stdin, :stdout, :stderr] do
       ref = Process.monitor(owner)
-      %Pipe{name: name, fd: fd, status: :open, owner: owner, monitor_ref: ref}
+      %Pipe{name: name, port: port, status: :open, owner: owner, monitor_ref: ref}
     else
       raise "invalid pipe name"
     end
@@ -41,16 +39,12 @@ defmodule ExCmd.Process.Pipe do
   @spec open?(t) :: boolean()
   def open?(pipe), do: pipe.status == :open
 
-  @spec read(t, non_neg_integer, pid) :: :eof | {:ok, binary} | {:error, :eagain} | {:error, term}
+  @spec read(t, non_neg_integer, pid) :: {:error, :eagain} | {:error, term}
   def read(pipe, size, caller) do
     if caller != pipe.owner do
       {:error, :pipe_closed_or_invalid_caller}
     else
-      case Proto.read(pipe.fd, size) do
-        # normalize return value
-        {:ok, <<>>} -> :eof
-        ret -> ret
-      end
+      {:error, :eagain} = Proto.read(pipe.port, size)
     end
   end
 
@@ -59,7 +53,7 @@ defmodule ExCmd.Process.Pipe do
     if caller != pipe.owner do
       {:error, :pipe_closed_or_invalid_caller}
     else
-      Proto.write_input(pipe.fd, bin)
+      Proto.write_input(pipe.port, bin)
     end
   end
 
@@ -69,7 +63,7 @@ defmodule ExCmd.Process.Pipe do
       {:error, :pipe_closed_or_invalid_caller}
     else
       Process.demonitor(pipe.monitor_ref, [:flush])
-      :ok = Proto.close(pipe.fd, pipe.name)
+      :ok = Proto.close(pipe.port, pipe.name)
       pipe = %Pipe{pipe | status: :closed, monitor_ref: nil, owner: nil}
 
       {:ok, pipe}

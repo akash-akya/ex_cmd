@@ -7,29 +7,25 @@ defmodule ExCmd.Process.Operations do
   @type t :: %__MODULE__{
           write_stdin: write_operation() | nil,
           read_stdout: read_operation() | nil,
-          read_stderr: read_operation() | nil,
-          read_stdout_or_stderr: read_any_operation() | nil
+          read_stderr: read_operation() | nil
         }
 
-  defstruct [:write_stdin, :read_stdout, :read_stderr, :read_stdout_or_stderr]
+  defstruct [:write_stdin, :read_stdout, :read_stderr]
 
   @spec new :: t
   def new, do: %__MODULE__{}
 
   @type write_operation ::
           {:write_stdin, GenServer.from(), binary}
-          | {:write_stdin, :demand}
+          | {:write_stdin, :demand, nil}
 
   @type read_operation ::
-          {:read_stdout, GenServer.from(), binary}
-          | {:read_stderr, GenServer.from(), binary}
+          {:read_stdout, GenServer.from(), non_neg_integer}
+          | {:read_stderr, GenServer.from(), non_neg_integer}
 
-  @type read_any_operation ::
-          {:read_stdout_or_stderr, GenServer.from(), binary}
+  @type operation :: write_operation() | read_operation()
 
-  @type operation :: write_operation() | read_operation() | read_any_operation()
-
-  @type name :: :write_stdin | :read_stdout | :read_stderr | :read_stdout_or_stderr
+  @type name :: :write_stdin | :read_stdout | :read_stderr
 
   @spec get(t, name) :: {:ok, operation()} | {:error, term}
   def get(operations, name) do
@@ -51,24 +47,6 @@ defmodule ExCmd.Process.Operations do
   def put(operations, operation) do
     with {:ok, {op_name, _from, _arg} = operation} <- validate_operation(operation) do
       {:ok, Map.put(operations, op_name, operation)}
-    end
-  end
-
-  @spec read_any(State.t(), read_any_operation()) ::
-          :eof
-          | {:noreply, State.t()}
-          | {:ok, {:stdout | :stderr, binary}}
-          | {:error, term}
-  def read_any(state, {:read_stdout_or_stderr, _from, _size} = operation) do
-    with {:ok, {_name, {caller, _}, arg}} <- validate_read_any_operation(operation),
-         first <- pipe_name(operation),
-         {:ok, primary} <- State.pipe(state, first),
-         second <- if(first == :stdout, do: :stderr, else: :stdout),
-         {:ok, secondary} <- State.pipe(state, second),
-         {:error, :eagain} <- do_read_any(caller, arg, primary, secondary),
-         {:ok, new_state} <- State.put_operation(state, operation) do
-      # dbg(new_state)
-      {:noreply, new_state}
     end
   end
 
@@ -94,23 +72,9 @@ defmodule ExCmd.Process.Operations do
   def write(state, operation) do
     with {:ok, {_name, {caller, _}, bin}} <- validate_write_operation(operation),
          pipe_name <- pipe_name(operation),
-         {:ok, pipe} <- State.pipe(state, pipe_name) do
-      case Pipe.write(pipe, bin, caller) do
-        {:ok, remaining} ->
-          handle_successful_write(state, remaining, operation)
-
-        {:error, :eagain} ->
-          case State.put_operation(state, operation) do
-            {:ok, new_state} ->
-              {:noreply, new_state}
-
-            error ->
-              error
-          end
-
-        ret ->
-          ret
-      end
+         {:ok, pipe} <- State.pipe(state, pipe_name),
+         {:ok, remaining} <- Pipe.write(pipe, bin, caller) do
+      handle_successful_write(state, remaining, operation)
     end
   end
 
@@ -164,10 +128,6 @@ defmodule ExCmd.Process.Operations do
   # credo:disable-for-next-line Credo.Check.Refactor.CyclomaticComplexity
   def match_pending_operation(state, pipe_name) do
     cond do
-      state.operations.read_stdout_or_stderr &&
-          pipe_name in [:stdout, :stderr] ->
-        {:ok, :read_stdout_or_stderr}
-
       state.operations.read_stdout &&
           pipe_name == :stdout ->
         {:ok, :read_stdout}
@@ -199,45 +159,6 @@ defmodule ExCmd.Process.Operations do
       end
     else
       :ok
-    end
-  end
-
-  @spec do_read_any(pid, non_neg_integer(), Pipe.t(), Pipe.t()) ::
-          :eof | {:ok, {Pipe.name(), binary}} | {:error, term}
-  defp do_read_any(caller, size, primary, secondary) do
-    case Pipe.read(primary, size, caller) do
-      ret1 when ret1 in [:eof, {:error, :eagain}, {:error, :pipe_closed_or_invalid_caller}] ->
-        case {ret1, Pipe.read(secondary, size, caller)} do
-          {:eof, :eof} ->
-            :eof
-
-          {_, {:ok, bin}} ->
-            {:ok, {secondary.name, bin}}
-
-          {ret1, {:error, :pipe_closed_or_invalid_caller}} ->
-            ret1
-
-          {_, ret2} ->
-            ret2
-        end
-
-      {:ok, bin} ->
-        {:ok, {primary.name, bin}}
-
-      ret1 ->
-        ret1
-    end
-  end
-
-  @spec validate_read_any_operation(operation) ::
-          {:ok, read_any_operation()} | {:error, :invalid_operation}
-  defp validate_read_any_operation(operation) do
-    case operation do
-      {:read_stdout_or_stderr, _from, size} when is_integer(size) and size >= 0 ->
-        {:ok, operation}
-
-      _ ->
-        {:error, :invalid_operation}
     end
   end
 
@@ -273,8 +194,7 @@ defmodule ExCmd.Process.Operations do
 
   @spec validate_operation(operation) :: {:ok, operation()} | {:error, :invalid_operation}
   defp validate_operation(operation) do
-    with {:error, :invalid_operation} <- validate_read_operation(operation),
-         {:error, :invalid_operation} <- validate_read_any_operation(operation) do
+    with {:error, :invalid_operation} <- validate_read_operation(operation) do
       validate_write_operation(operation)
     end
   end
@@ -285,7 +205,6 @@ defmodule ExCmd.Process.Operations do
       :write_stdin -> :stdin
       :read_stdout -> :stdout
       :read_stderr -> :stderr
-      :read_stdout_or_stderr -> :stdout
     end
   end
 end

@@ -1,13 +1,15 @@
 defmodule ExCmd.Process.State do
   @moduledoc false
 
+  alias ExCmd.Process.Exec
   alias ExCmd.Process.Operations
+  alias ExCmd.Process.Pipe
 
   alias __MODULE__
 
   @type read_mode :: :stdout | :stderr | :stdout_or_stderr
 
-  @type stderr_mode :: :console | :redirect_to_stdout | :disable | :consume
+  @type stderr_mode :: :console | :redirect_to_stdout | :disable
 
   @type pipes :: %{
           stdin: Pipe.t(),
@@ -67,16 +69,6 @@ defmodule ExCmd.Process.State do
     else
       {:error, :invalid_name}
     end
-  end
-
-  @spec pipe_name_for_fd(State.t(), fd :: Pipe.fd()) :: Pipe.name()
-  def pipe_name_for_fd(state, fd) do
-    pipe =
-      state.pipes
-      |> Map.values()
-      |> Enum.find(&(&1.fd == fd))
-
-    pipe.name
   end
 
   @spec put_operation(State.t(), Operations.operation()) :: {:ok, t} | {:error, term}

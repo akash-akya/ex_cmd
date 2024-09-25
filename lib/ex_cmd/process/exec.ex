@@ -13,7 +13,8 @@ defmodule ExCmd.Process.Exec do
              cmd_with_args: nonempty_list(),
              cd: charlist,
              env: env,
-             stderr: :console | :redirect_to_stdout | :disable | :consume
+             stderr: :console | :redirect_to_stdout | :disable,
+             log: nil | String.t()
            }}
           | {:error, String.t()}
   def normalize_exec_args(cmd_with_args, opts) do
@@ -28,7 +29,7 @@ defmodule ExCmd.Process.Exec do
     end
   end
 
-  @spec normalize_cmd(nonempty_list()) :: {:ok, nonempty_list()} | {:error, binary()}
+  @spec normalize_cmd(nonempty_list()) :: {:ok, nonempty_list()} | {:error, String.t()}
   defp normalize_cmd(arg) do
     case arg do
       [cmd | _] when is_binary(cmd) ->
@@ -53,7 +54,7 @@ defmodule ExCmd.Process.Exec do
     end
   end
 
-  @spec normalize_cd(binary) :: {:ok, charlist()} | {:error, String.t()}
+  @spec normalize_cd(String.t()) :: {:ok, charlist()} | {:error, String.t()}
   defp normalize_cd(cd) do
     case cd do
       nil ->
@@ -71,7 +72,7 @@ defmodule ExCmd.Process.Exec do
     end
   end
 
-  @type env :: list({String.t(), String.t()})
+  @type env :: [{String.t(), String.t()}]
 
   @spec normalize_env(env) :: {:ok, env} | {:error, String.t()}
   defp normalize_env(env) do
@@ -92,8 +93,8 @@ defmodule ExCmd.Process.Exec do
     end
   end
 
-  @spec normalize_stderr(stderr :: :console | :redirect_to_stdout | :disable | :consume | nil) ::
-          {:ok, :console | :redirect_to_stdout | :disable | :consume} | {:error, String.t()}
+  @spec normalize_stderr(stderr :: :console | :redirect_to_stdout | :disable | nil) ::
+          {:ok, :console | :redirect_to_stdout | :disable} | {:error, String.t()}
   defp normalize_stderr(stderr) do
     case stderr do
       nil ->
@@ -103,8 +104,7 @@ defmodule ExCmd.Process.Exec do
         {:ok, stderr}
 
       _ ->
-        {:error,
-         ":stderr must be an atom and one of :redirect_to_stdout, :console, :disable, :consume"}
+        {:error, ":stderr must be an atom and one of :redirect_to_stdout, :console, :disable"}
     end
   end
 

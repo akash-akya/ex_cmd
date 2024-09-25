@@ -124,8 +124,7 @@ defmodule ExCmd.Process do
 
     1. `:console`  -  stderr output is redirected to console (Default)
     2. `:redirect_to_stdout`  -  stderr output is redirected to stdout
-    2. `:consume`  -  stderr output read separately, allowing you to consume it separately from stdout. See below for more details
-    4. `:disable`  -  stderr output is redirected `/dev/null` suppressing all output. See below for more details.
+    3. `:disable`  -  stderr output is redirected `/dev/null` suppressing all output. See below for more details.
 
 
   ### Using `redirect_to_stdout`
@@ -274,9 +273,9 @@ defmodule ExCmd.Process do
   use GenServer
 
   alias ExCmd.Process.Exec
-  alias ExCmd.Process.Proto
   alias ExCmd.Process.Operations
   alias ExCmd.Process.Pipe
+  alias ExCmd.Process.Proto
   alias ExCmd.Process.State
 
   require Logger
@@ -297,8 +296,6 @@ defmodule ExCmd.Process do
   defstruct [:monitor_ref, :exit_ref, :pid, :owner]
 
   @type exit_status :: non_neg_integer
-
-  @type caller :: GenServer.from()
 
   @default_opts [env: [], stderr: :console, log: nil]
   @default_buffer_size 65_531
@@ -353,8 +350,6 @@ defmodule ExCmd.Process do
         1. `:console`  -  stderr output is redirected to console (Default)
         2. `:redirect_to_stdout`  -  stderr output is redirected to stdout
         3. `:disable`  -  stderr output is redirected `/dev/null` suppressing all output
-        4. `:consume`  -  connects stderr for the consumption. When set, the stderr output must be consumed to
-  avoid external program from blocking.
 
       See [`:stderr`](#module-stderr) for more details and issues associated with them
 
@@ -496,7 +491,8 @@ defmodule ExCmd.Process do
 
   For more details check module documentation.
   """
-  @spec await_exit(t, timeout :: timeout()) :: {:ok, exit_status}
+  @spec await_exit(t, timeout :: timeout()) ::
+          {:ok, exit_status} | {:error, :killed} | {:error, term}
   def await_exit(process, timeout \\ 5000) do
     %__MODULE__{
       monitor_ref: monitor_ref,
@@ -782,12 +778,7 @@ defmodule ExCmd.Process do
     %{cmd_with_args: cmd_with_args, env: env} = state.args
     {os_pid, port} = Proto.start(cmd_with_args, env, Map.take(state.args, [:log, :stderr, :cd]))
 
-    stderr =
-      if state.stderr == :consume do
-        Pipe.new(:stderr, port, state.owner)
-      else
-        Pipe.new(:stderr)
-      end
+    stderr = Pipe.new(:stderr)
 
     %State{
       state
@@ -806,20 +797,12 @@ defmodule ExCmd.Process do
 
   @spec handle_command(recv_commands, binary, State.t()) :: {:noreply, State.t()}
   def handle_command(tag, bin, state) when tag in [:output_eof, :output] do
-    # State.pipe_name_for_fd(state, read_resource)
     pipe_name = :stdout
 
     with {:ok, operation_name} <- Operations.match_pending_operation(state, pipe_name),
          {:ok, {_stream, from, _}, state} <- State.pop_operation(state, operation_name) do
       ret =
         case {operation_name, bin} do
-          {:read_stdout_or_stderr, <<>>} ->
-            :eof
-
-          {:read_stdout_or_stderr, bin} ->
-            # TODO: must be stderr in case of stderr
-            {:ok, {:stdout, bin}}
-
           {name, <<>>} when name in [:read_stdout, :read_stderr] ->
             :eof
 
@@ -867,7 +850,7 @@ defmodule ExCmd.Process do
     maybe_shutdown(state)
   end
 
-  @spec close_pipes(State.t(), caller) :: State.t()
+  @spec close_pipes(State.t(), pid) :: State.t()
   defp close_pipes(state, caller) do
     state =
       case Pipe.close(state.pipes.stdin, caller) do

@@ -234,7 +234,7 @@ defmodule ExCmd do
   @spec stream!(nonempty_list(String.t()),
           input: Enum.t() | collectable_func(),
           exit_timeout: timeout(),
-          stderr: :console | :redirect_to_stdout | :disable | :consume,
+          stderr: :console | :redirect_to_stdout | :disable,
           ignore_epipe: boolean(),
           max_chunk_size: pos_integer()
         ) :: ExCmd.Stream.t()
@@ -255,7 +255,7 @@ defmodule ExCmd do
   @spec stream(nonempty_list(String.t()),
           input: Enum.t() | collectable_func(),
           exit_timeout: timeout(),
-          stderr: :console | :redirect_to_stdout | :disable | :consume,
+          stderr: :console | :redirect_to_stdout | :disable,
           ignore_epipe: boolean(),
           max_chunk_size: pos_integer()
         ) :: ExCmd.Stream.t()

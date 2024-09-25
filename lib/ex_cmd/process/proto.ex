@@ -1,6 +1,8 @@
 defmodule ExCmd.Process.Proto do
   @moduledoc false
 
+  alias Mix.Tasks.Compile.Odu
+
   require Logger
 
   @doc false
@@ -58,6 +60,7 @@ defmodule ExCmd.Process.Proto do
     end
   end
 
+  @spec read(port, pos_integer) :: {:error, :eagain}
   def read(port, max_size) when is_integer(max_size) and max_size > 0 and max_size <= 65_536 do
     send_command(send_output(), <<max_size::big-signed-integer-32>>, port)
     {:error, :eagain}
@@ -83,6 +86,7 @@ defmodule ExCmd.Process.Proto do
   # 4 byte length prefix + 1 byte tag
   @max_chunk_size 64 * 1024 - 5
 
+  @spec write_input(port, binary) :: {:ok, binary}
   def write_input(port, bin) do
     {chunk, bin} = binary_split_at(bin, @max_chunk_size)
     send_command(input(), chunk, port)
@@ -198,7 +202,7 @@ defmodule ExCmd.Process.Proto do
   defp odu_path do
     path =
       Application.app_dir(:ex_cmd, "priv")
-      |> Path.join(Mix.Tasks.Compile.Odu.executable_name())
+      |> Path.join(Odu.executable_name())
 
     if !File.exists?(path) do
       raise ArgumentError, message: "'odu' executable not found"

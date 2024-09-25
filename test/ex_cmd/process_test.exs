@@ -124,7 +124,7 @@ defmodule ExCmd.ProcessTest do
                pipes: %{
                  stdin: %Pipe{
                    name: :stdin,
-                   fd: _,
+                   port: _,
                    monitor_ref: nil,
                    owner: nil,
                    status: :closed
@@ -161,7 +161,7 @@ defmodule ExCmd.ProcessTest do
                pipes: %{
                  stdin: %Pipe{
                    name: :stdin,
-                   fd: _,
+                   port: _,
                    monitor_ref: nil,
                    owner: nil,
                    status: :closed
@@ -539,24 +539,6 @@ defmodule ExCmd.ProcessTest do
     end
   end
 
-  # this test does not work properly in linux
-  @tag :skip
-  test "if we are leaking file descriptor" do
-    {:ok, s} = Process.start_link(~w(sleep 60))
-    {:ok, os_pid} = Process.os_pid(s)
-
-    # we are only printing FD, TYPE, NAME with respective prefix
-    {bin, 0} = System.cmd("lsof", ["-F", "ftn", "-p", to_string(os_pid)])
-
-    open_files = parse_lsof(bin)
-
-    assert [
-             %{type: "PIPE", fd: "0", name: _},
-             %{type: "PIPE", fd: "1", name: _},
-             %{type: "CHR", fd: "2", name: "/dev/ttys007"}
-           ] = open_files
-  end
-
   describe "options and validation" do
     test "cd option" do
       parent = Path.expand("..", File.cwd!())
@@ -646,40 +628,6 @@ defmodule ExCmd.ProcessTest do
 
   defp fixture(script) do
     Path.join([__DIR__, "../scripts", script])
-  end
-
-  defp parse_lsof(iodata) do
-    String.split(IO.iodata_to_binary(iodata), "\n", trim: true)
-    |> Enum.reduce([], fn
-      "f" <> fd, acc -> [%{fd: fd} | acc]
-      "t" <> type, [h | acc] -> [Map.put(h, :type, type) | acc]
-      "n" <> name, [h | acc] -> [Map.put(h, :name, name) | acc]
-      _, acc -> acc
-    end)
-    |> Enum.reverse()
-    |> Enum.reject(fn
-      %{fd: fd} when fd in ["255", "cwd", "txt"] ->
-        true
-
-      %{fd: "rtd", name: "/", type: "DIR"} ->
-        true
-
-      # filter libc and friends
-      %{fd: "mem", type: "REG", name: "/lib/x86_64-linux-gnu/" <> _} ->
-        true
-
-      %{fd: "mem", type: "REG", name: "/usr/lib/locale/C.UTF-8/" <> _} ->
-        true
-
-      %{fd: "mem", type: "REG", name: "/usr/lib/locale/locale-archive" <> _} ->
-        true
-
-      %{fd: "mem", type: "REG", name: "/usr/lib/x86_64-linux-gnu/gconv" <> _} ->
-        true
-
-      _ ->
-        false
-    end)
   end
 
   defp generate_binary(size) do
