@@ -129,7 +129,9 @@ defmodule ExCmd.Process.Proto do
     bin = <<tag::unsigned-integer-8, bin::binary>>
 
     try do
-      true = Port.command(port, bin)
+      # even though we are using `:nosuspend` we should never receive `false`
+      # since we are disabling busy_limits while opening the `port`
+      true = Port.command(port, bin, [:nosuspend])
       :ok
     rescue
       # this is needed because the port might have already been closed
@@ -152,7 +154,18 @@ defmodule ExCmd.Process.Proto do
 
   defp start_odu_port(odu_path, cmd_with_args, opts) do
     args = build_odu_params(opts) ++ ["--" | cmd_with_args]
-    options = [:use_stdio, :exit_status, :binary, :hide, {:packet, 4}, args: args]
+
+    options = [
+      :use_stdio,
+      :exit_status,
+      :binary,
+      :hide,
+      {:packet, 4},
+      args: args,
+      busy_limits_port: :disabled,
+      busy_limits_msgq: :disabled
+    ]
+
     Port.open({:spawn_executable, odu_path}, options)
   end
 
