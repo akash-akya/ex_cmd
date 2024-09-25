@@ -8,5 +8,5 @@
     end
   )
 
-Logger.configure(level: :debug)
+Logger.configure(level: :warning)
 ExUnit.start(capture_log: false)

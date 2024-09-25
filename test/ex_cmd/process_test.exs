@@ -202,7 +202,7 @@ defmodule ExCmd.ProcessTest do
     end
 
     test "if await_exit kills the program" do
-      {:ok, s} = Process.start_link(~w(sleep 10000), log: :stderr)
+      {:ok, s} = Process.start_link(~w(sleep 10000))
       assert_killed(Process.await_exit(s, 1000))
     end
 
