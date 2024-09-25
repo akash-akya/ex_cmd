@@ -21,7 +21,7 @@ defmodule ExCmd.ProcessTest do
       assert {:ok, 0} == Process.await_exit(s, 500)
 
       # wait for the process to terminate
-      :timer.sleep(100)
+      :timer.sleep(200)
       refute Elixir.Process.alive?(s.pid)
     end
 
@@ -42,7 +42,7 @@ defmodule ExCmd.ProcessTest do
       assert {:ok, 0} == Process.await_exit(s, 200)
 
       # wait for the process to terminate
-      :timer.sleep(100)
+      :timer.sleep(200)
       refute Elixir.Process.alive?(s.pid)
     end
 

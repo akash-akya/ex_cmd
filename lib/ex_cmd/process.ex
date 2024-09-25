@@ -636,6 +636,9 @@ defmodule ExCmd.Process do
 
   def handle_call({:write_stdin, binary}, from, state) do
     case State.pop_operation(state, :write_stdin) do
+      _ when state.status != :running ->
+        {:reply, {:error, :epipe}, state}
+
       {:error, :operation_not_found} ->
         case Operations.pending_input(state, from, binary) do
           {:noreply, state} ->
@@ -888,15 +891,16 @@ defmodule ExCmd.Process do
     end)
   end
 
+  @kill_command_buffer_timeout 100
+
   @spec divide_timeout(non_neg_integer) :: {non_neg_integer, non_neg_integer}
   defp divide_timeout(timeout) when timeout > @exit_status_buffer_timeout do
     timeout = timeout - @exit_status_buffer_timeout
 
-    if timeout < 50 do
+    if timeout < @kill_command_buffer_timeout do
       {0, 0}
     else
-      # we need at least 50s
-      kill_timeout = min(50, timeout - 50)
+      kill_timeout = min(@kill_command_buffer_timeout, timeout - @kill_command_buffer_timeout)
       {timeout - kill_timeout, kill_timeout}
     end
   end

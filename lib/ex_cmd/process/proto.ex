@@ -1,4 +1,6 @@
 defmodule ExCmd.Process.Proto do
+  @moduledoc false
+
   require Logger
 
   @doc false
