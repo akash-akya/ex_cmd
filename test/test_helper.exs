@@ -9,4 +9,4 @@
   )
 
 Logger.configure(level: :warning)
-ExUnit.start(capture_log: false)
+ExUnit.start(capture_log: true)
