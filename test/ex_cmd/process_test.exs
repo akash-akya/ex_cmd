@@ -2,314 +2,600 @@ defmodule ExCmd.ProcessTest do
   use ExUnit.Case, async: true
 
   alias ExCmd.Process
-  alias Mix.Tasks.Compile.Odu
+  alias ExCmd.Process.{Pipe, State}
 
-  @large_bin Stream.cycle(["a"])
-             |> Stream.take(1_000_000)
-             |> Enum.to_list()
-             |> IO.iodata_to_binary()
+  doctest ExCmd.Process
 
-  test "read" do
-    {:ok, s} = Process.start_link(~w(echo test))
-    assert {:ok, output} = Process.read(s)
-    assert String.trim(output) == "test"
-    assert :eof == Process.read(s)
-    assert :ok == Process.close_stdin(s)
-    # exit status from terminated command is async
-    :timer.sleep(100)
-    assert {:done, 0} == Process.status(s)
+  describe "pipes" do
+    test "reading from stdout" do
+      {:ok, s} = Process.start_link(~w(echo test))
+      :timer.sleep(100)
+
+      assert {:ok, iodata} = Process.read(s, 100)
+      assert :eof = Process.read(s, 100)
+      assert IO.iodata_to_binary(iodata) == "test\n"
+
+      assert :ok == Process.close_stdin(s)
+      assert :ok == Process.close_stdout(s)
+
+      assert {:ok, 0} == Process.await_exit(s, 500)
+
+      # wait for the process to terminate
+      :timer.sleep(200)
+      refute Elixir.Process.alive?(s.pid)
+    end
+
+    test "write to stdin" do
+      {:ok, s} = Process.start_link(~w(cat))
+
+      assert :ok == Process.write(s, "hello")
+      assert {:ok, iodata} = Process.read(s, 5)
+      assert IO.iodata_to_binary(iodata) == "hello"
+
+      assert :ok == Process.write(s, "world")
+      assert {:ok, iodata} = Process.read(s, 5)
+      assert IO.iodata_to_binary(iodata) == "world"
+
+      assert :ok == Process.close_stdin(s)
+      assert :eof == Process.read(s)
+
+      assert {:ok, 0} == Process.await_exit(s, 200)
+
+      # wait for the process to terminate
+      :timer.sleep(200)
+      refute Elixir.Process.alive?(s.pid)
+    end
+
+    test "when stdin is closed" do
+      logger = start_events_collector()
+
+      # base64 produces output only after getting EOF from stdin.  we
+      # collect events in order and assert that we can still read from
+      # stdout even after closing stdin
+      {:ok, s} = Process.start_link(~w(base64))
+
+      # parallel reader should be blocked till we close stdin
+      start_parallel_reader(s, logger)
+      :timer.sleep(100)
+
+      assert :ok == Process.write(s, "hello")
+      add_event(logger, {:write, "hello"})
+      assert :ok == Process.write(s, "world")
+      add_event(logger, {:write, "world"})
+      :timer.sleep(100)
+
+      assert :ok == Process.close_stdin(s)
+      add_event(logger, :input_close)
+      assert {:ok, 0} == Process.await_exit(s)
+      # Process.stop(s)
+
+      # wait for the reader to read
+      Elixir.Process.sleep(500)
+
+      assert [
+               {:write, "hello"},
+               {:write, "world"},
+               :input_close,
+               {:read, "aGVsbG93b3JsZA==\n"},
+               :eof
+             ] == get_events(logger)
+    end
+
+    test "stderr disabled" do
+      script = """
+      echo "==foo=="
+      echo "==bar==" >&2
+      """
+
+      {:ok, s} = Process.start_link(["sh", "-c", script], stderr: :disable)
+
+      assert {:ok, "==foo==\n"} = Process.read(s, 100)
+      assert :eof = Process.read(s, 100)
+      assert {:ok, 0} = Process.await_exit(s, 200)
+    end
+
+    test "stderr redirect_to_stdout" do
+      script = """
+      echo "==foo=="
+      echo "==bar==" >&2
+      """
+
+      {:ok, s} = Process.start_link(["sh", "-c", script], stderr: :redirect_to_stdout)
+      # wait for the the both output to merge
+      :timer.sleep(1000)
+
+      assert {:ok, "==foo==\n==bar==\n"} = Process.read(s, 100)
+      assert :eof = Process.read(s, 100)
+      assert {:ok, 0} = Process.await_exit(s, 200)
+    end
+
+    test "if pipe gets closed on pipe owner exit normally" do
+      {:ok, s} = Process.start_link(~w(sleep 10000))
+
+      writer =
+        Task.async(fn ->
+          Process.change_pipe_owner(s, :stdin, self())
+        end)
+
+      # stdin must be closed on task completion
+      :ok = Task.await(writer)
+
+      assert %State{
+               pipes: %{
+                 stdin: %Pipe{
+                   name: :stdin,
+                   port: _,
+                   monitor_ref: nil,
+                   owner: nil,
+                   status: :closed
+                 },
+                 # ensure other pipes are unaffected
+                 stdout: %Pipe{
+                   name: :stdout,
+                   status: :open
+                 }
+               }
+             } = :sys.get_state(s.pid)
+    end
+
+    test "if pipe gets closed on pipe owner is killed" do
+      {:ok, s} = Process.start_link(~w(sleep 10000))
+
+      writer =
+        spawn(fn ->
+          Process.change_pipe_owner(s, :stdin, self())
+
+          receive do
+            :block -> :ok
+          end
+        end)
+
+      # wait for pipe owner to change
+      :timer.sleep(100)
+
+      # stdin must be closed on process kill
+      true = Elixir.Process.exit(writer, :kill)
+      :timer.sleep(1000)
+
+      assert %State{
+               pipes: %{
+                 stdin: %Pipe{
+                   name: :stdin,
+                   port: _,
+                   monitor_ref: nil,
+                   owner: nil,
+                   status: :closed
+                 },
+                 # ensure other pipes are unaffected
+                 stdout: %Pipe{
+                   name: :stdout,
+                   status: :open
+                 }
+               }
+             } = :sys.get_state(s.pid)
+    end
   end
 
-  test "write" do
-    {:ok, s} = Process.start_link(~w(cat))
-    assert :ok == Process.write(s, "hello")
-    assert {:ok, "hello"} == Process.read(s)
-    assert :ok == Process.write(s, "world")
-    assert {:ok, "world"} == Process.read(s)
-    assert :ok == Process.close_stdin(s)
-    assert :eof == Process.read(s)
+  describe "process termination" do
+    test "if process is terminated automatically on owner exit" do
+      pid = self()
 
-    # exit status from terminated command is async
-    :timer.sleep(50)
-    assert {:done, 0} == Process.status(s)
+      spawn_link(fn ->
+        {:ok, s} = Process.start_link(~w(cat))
+        {:ok, os_pid} = Process.os_pid(s)
+        send(pid, os_pid)
+      end)
+
+      os_pid =
+        receive do
+          os_pid -> os_pid
+        end
+
+      :timer.sleep(500)
+
+      refute os_process_alive?(os_pid)
+    end
+
+    test "if await_exit closes stdin implicitly" do
+      {:ok, s} = Process.start_link(~w(cat))
+      assert {:ok, 0} = Process.await_exit(s, 200)
+    end
+
+    test "if await_exit kills the program" do
+      {:ok, s} = Process.start_link(~w(sleep 10000))
+      assert_killed(Process.await_exit(s, 1000))
+    end
+
+    test "if external program terminates on process exit" do
+      {:ok, s} = Process.start_link(~w(cat))
+      {:ok, os_pid} = Process.os_pid(s)
+
+      assert os_process_alive?(os_pid)
+
+      :ok = Process.close_stdin(s)
+      assert :eof = Process.read(s)
+      :timer.sleep(1000)
+
+      refute os_process_alive?(os_pid)
+    end
+
+    test "read after command finishes" do
+      {:ok, s} = Process.start_link(~w(cat))
+      {:ok, os_pid} = Process.os_pid(s)
+      assert os_process_alive?(os_pid)
+
+      assert :ok == Process.write(s, "hello")
+      :ok = Process.close_stdin(s)
+      :timer.sleep(1000)
+
+      assert {:ok, "hello"} == Process.read(s)
+    end
+
+    @tag skip: Application.compile_env!(:ex_cmd, :current_os) == :windows
+    test "watcher kills external command on process without exit_await" do
+      {os_pid, s} =
+        Task.async(fn ->
+          {:ok, s} = Process.start_link([fixture("ignore_sigterm.sh")])
+          {:ok, os_pid} = Process.os_pid(s)
+          assert os_process_alive?(os_pid)
+
+          # ensure the script set the correct signal handlers (handlers to ignore signal)
+          assert {:ok, "ignored signals\n" <> _} = Process.read(s)
+
+          # exit without waiting for the ex_cmd process
+          {os_pid, s}
+        end)
+        |> Task.await()
+
+      :timer.sleep(2000)
+
+      # ExCmd Process should exit after Task process terminates
+      refute Elixir.Process.alive?(s.pid)
+      refute os_process_alive?(os_pid)
+    end
+
+    @tag skip: Application.compile_env!(:ex_cmd, :current_os) == :windows
+    test "await_exit with timeout" do
+      {:ok, s} = Process.start_link([fixture("ignore_sigterm.sh")])
+      {:ok, os_pid} = Process.os_pid(s)
+      assert os_process_alive?(os_pid)
+
+      assert {:ok, "ignored signals\n" <> _} = Process.read(s)
+
+      # attempt to kill the process after 1000ms
+      assert_killed(Process.await_exit(s, 1000))
+
+      refute os_process_alive?(os_pid)
+      refute Elixir.Process.alive?(s.pid)
+    end
+
+    test "exit status" do
+      {:ok, s} = Process.start_link(["sh", "-c", "exit 10"])
+      assert {:ok, 10} == Process.await_exit(s)
+    end
+
+    @tag skip: Application.compile_env!(:ex_cmd, :current_os) == :windows
+    test "check command that does not take any input or produce output" do
+      {:ok, s} = Process.start_link(["sh", "-c", fixture("forever.sh")])
+      assert ret = Process.await_exit(s)
+      # process might die with different reason due to race condition
+      assert ret in [{:error, :killed}, {:ok, 127}]
+    end
+
+    test "writing binary larger than pipe buffer size" do
+      large_bin = generate_binary(5 * 65_535)
+      {:ok, s} = Process.start_link(~w(cat))
+
+      writer =
+        Task.async(fn ->
+          Process.change_pipe_owner(s, :stdin, self())
+          Process.write(s, large_bin)
+        end)
+
+      :timer.sleep(100)
+
+      iodata =
+        Stream.unfold(nil, fn _ ->
+          case Process.read(s) do
+            {:ok, data} -> {data, nil}
+            :eof -> nil
+          end
+        end)
+        |> Enum.to_list()
+
+      Task.await(writer)
+
+      assert IO.iodata_length(iodata) == 5 * 65_535
+      assert {:ok, 0} == Process.await_exit(s, 500)
+    end
+
+    test "if ex_cmd process is terminated on owner exit even if pipe owner is alive" do
+      parent = self()
+
+      owner =
+        spawn(fn ->
+          # owner process terminated without await_exit
+          {:ok, s} = Process.start_link(~w(cat))
+
+          snd(parent, {:ok, s})
+          :exit = recv(parent)
+        end)
+
+      {:ok, s} = recv(owner)
+
+      spawn_link(fn ->
+        Process.change_pipe_owner(s, :stdin, self())
+        block()
+      end)
+
+      spawn_link(fn ->
+        Process.change_pipe_owner(s, :stdout, self())
+        block()
+      end)
+
+      # wait for pipe owner to change
+      :timer.sleep(500)
+
+      snd(owner, :exit)
+
+      # wait for messages to propagate, if there are any
+      :timer.sleep(500)
+
+      refute Elixir.Process.alive?(owner)
+      refute Elixir.Process.alive?(s.pid)
+    end
+
+    test "if ex_cmd process is *NOT* terminated on owner exit, if any pipe owner is alive" do
+      parent = self()
+
+      {:ok, s} = Process.start_link(~w(cat))
+
+      io_proc =
+        spawn_link(fn ->
+          :ok = Process.change_pipe_owner(s, :stdin, self())
+          :ok = Process.change_pipe_owner(s, :stdout, self())
+          send(parent, :continue)
+          recv(parent)
+        end)
+
+      # wait for pipe owner to change
+      receive do
+        :continue -> :ok
+      end
+
+      # external process will be killed with SIGTERM (143)
+      assert_killed(Process.await_exit(s, 1000))
+
+      # wait for messages to propagate, if there are any
+      :timer.sleep(100)
+
+      assert Elixir.Process.alive?(s.pid)
+
+      assert %State{
+               pipes: %{
+                 stdin: %Pipe{status: :open},
+                 stdout: %Pipe{status: :open}
+               }
+             } = :sys.get_state(s.pid)
+
+      # when the io_proc exits, the pipes should be closed and process must terminate
+      snd(io_proc, :exit)
+      :timer.sleep(100)
+
+      refute Elixir.Process.alive?(s.pid)
+    end
+
+    test "when process is killed with a pending concurrent write" do
+      {:ok, s} = Process.start_link(~w(cat))
+      {:ok, os_pid} = Process.os_pid(s)
+
+      large_data =
+        Stream.cycle(["test"])
+        |> Stream.take(500_000)
+        |> Enum.to_list()
+        |> IO.iodata_to_binary()
+
+      parent = self()
+
+      task =
+        Task.async(fn ->
+          Process.change_pipe_owner(s, :stdin, self())
+          send(parent, :owner_changed)
+          Process.write(s, large_data)
+        end)
+
+      # to avoid race conditions, like if process is killed before owner
+      # is changed
+      receive do
+        :owner_changed -> :ok
+      end
+
+      _ = Process.await_exit(s, 1000)
+
+      refute os_process_alive?(os_pid)
+      assert {:error, :epipe} == Task.await(task)
+    end
+
+    test "if owner is killed when the ex_cmd process is killed" do
+      parent = self()
+
+      # create an ex_cmd process without linking to caller
+      owner =
+        spawn(fn ->
+          assert {:ok, s} = Process.start_link(~w(cat))
+          snd(parent, s.pid)
+          block()
+        end)
+
+      owner_ref = Elixir.Process.monitor(owner)
+
+      ex_cmd_pid = recv(owner)
+
+      ex_cmd_ref = Elixir.Process.monitor(ex_cmd_pid)
+
+      assert Elixir.Process.alive?(owner)
+      assert Elixir.Process.alive?(ex_cmd_pid)
+
+      true = Elixir.Process.exit(ex_cmd_pid, :kill)
+
+      assert_receive {:DOWN, ^owner_ref, :process, ^owner, :killed}
+      assert_receive {:DOWN, ^ex_cmd_ref, :process, ^ex_cmd_pid, :killed}
+    end
+
+    test "if ex_cmd process is killed when the owner is killed" do
+      parent = self()
+
+      # create an ex_cmd process without linking to caller
+      owner =
+        spawn(fn ->
+          assert {:ok, s} = Process.start_link(~w(cat))
+          snd(parent, s.pid)
+          block()
+        end)
+
+      owner_ref = Elixir.Process.monitor(owner)
+
+      ex_cmd_pid = recv(owner)
+
+      ex_cmd_ref = Elixir.Process.monitor(ex_cmd_pid)
+
+      assert Elixir.Process.alive?(owner)
+      assert Elixir.Process.alive?(ex_cmd_pid)
+
+      true = Elixir.Process.exit(owner, :kill)
+
+      assert_receive {:DOWN, ^owner_ref, :process, ^owner, :killed}
+      assert_receive {:DOWN, ^ex_cmd_ref, :process, ^ex_cmd_pid, :killed}
+    end
   end
 
-  test "stdin close" do
+  test "back-pressure" do
     logger = start_events_collector()
 
-    # base64 produces output only after getting EOF from stdin.  we
-    # collect events in order and assert that we can still read from
-    # stdout even after closing stdin
-    {:ok, s} = Process.start_link(~w(base64))
+    # we test backpressure by testing if `write` is delayed when we delay read
+    {:ok, s} = Process.start_link(~w(cat))
 
-    # parallel reader should be blocked till we close stdin
-    start_parallel_reader(s, logger)
+    large_bin = generate_binary(65_535 * 5)
+
+    writer =
+      Task.async(fn ->
+        Process.change_pipe_owner(s, :stdin, self())
+        :ok = Process.write(s, large_bin)
+        add_event(logger, {:write, IO.iodata_length(large_bin)})
+      end)
+
     :timer.sleep(50)
 
-    assert :ok == Process.write(s, "hello")
-    add_event(logger, {:write, "hello"})
-    assert :ok == Process.write(s, "world")
-    add_event(logger, {:write, "world"})
-    :timer.sleep(50)
+    reader =
+      Task.async(fn ->
+        Process.change_pipe_owner(s, :stdout, self())
 
-    assert :ok == Process.close_stdin(s)
-    add_event(logger, :input_close)
-    :timer.sleep(50)
-    assert {:done, 0} == Process.status(s)
+        Stream.unfold(nil, fn _ ->
+          case Process.read(s) do
+            {:ok, data} ->
+              add_event(logger, {:read, IO.iodata_length(data)})
+              # delay in reading should delay writes
+              :timer.sleep(10)
+              {nil, nil}
 
-    assert [
-             {:write, "hello"},
-             {:write, "world"},
-             :input_close,
-             {:read, "aGVsbG93b3JsZA==\n"},
-             :eof
-           ] == get_events(logger)
+            :eof ->
+              nil
+          end
+        end)
+        |> Stream.run()
+      end)
+
+    Task.await(writer)
+    Task.await(reader)
+
+    assert {:ok, 0} == Process.await_exit(s)
+
+    events = get_events(logger)
+
+    {write_events, read_evants} = Enum.split_with(events, &match?({:write, _}, &1))
+
+    assert Enum.sum(Enum.map(read_evants, fn {:read, size} -> size end)) ==
+             Enum.sum(Enum.map(write_events, fn {:write, size} -> size end))
+
+    # There must be a read before write completes
+    assert {:read, _} = hd(events)
   end
 
   test "os pid" do
-    if windows?() do
+    if Application.fetch_env!(:ex_cmd, :current_os) == :windows do
       {:ok, s} = Process.start_link(~w(cat))
-      os_pid = Process.os_pid(s)
+      {:ok, os_pid} = Process.os_pid(s)
 
       {output, 0} = System.cmd("tasklist", ["/fi", "pid eq #{os_pid}"])
       assert String.contains?(output, "cat.exe")
-      Process.stop(s)
+      assert {:ok, 0} = Process.await_exit(s)
     else
       {:ok, s} = Process.start_link(~w(cat))
-      os_pid = Process.os_pid(s)
+      {:ok, os_pid} = Process.os_pid(s)
 
       {outout, 0} = System.cmd("sh", ["-c", "ps -o args -p #{os_pid} | tail -1"])
       assert System.find_executable("cat") == String.trim(outout)
-      Process.stop(s)
+      assert {:ok, 0} = Process.await_exit(s)
     end
   end
 
-  test "external command kill" do
-    {:ok, s} = Process.start_link(~w(cat))
-    os_pid = Process.os_pid(s)
-    assert os_process_alive?(os_pid)
+  describe "options and validation" do
+    test "cd option" do
+      parent = Path.expand("..", File.cwd!())
+      {:ok, s} = Process.start_link(~w(sh -c pwd), cd: parent)
+      {:ok, dir} = Process.read(s)
 
-    Process.close_stdin(s)
+      assert Path.basename(String.trim(dir)) == Path.basename(parent)
+      assert {:ok, 0} = Process.await_exit(s)
+    end
 
-    Process.stop(s)
-    :timer.sleep(100)
+    test "when cd is invalid" do
+      assert {:error, _} = Process.start_link(~w(sh -c pwd), cd: "invalid")
+    end
 
-    refute os_process_alive?(os_pid)
-  end
+    test "when user pass invalid option" do
+      assert {:error, "invalid opts: [invalid: :test]"} =
+               Process.start_link(~w(cat), invalid: :test)
+    end
 
-  test "external command forceful kill" do
-    # cat command hangs waiting for EOF
-    {:ok, s} = Process.start_link(~w(cat))
+    test "env option" do
+      assert {:ok, s} = Process.start_link(~w(printenv TEST_ENV), env: %{"TEST_ENV" => "test"})
 
-    os_pid = Process.os_pid(s)
-    assert os_process_alive?(os_pid)
+      assert {:ok, "test\n"} = Process.read(s)
+      assert {:ok, 0} = Process.await_exit(s)
+    end
 
-    Process.stop(s)
+    test "if external process inherits beam env" do
+      :ok = System.put_env([{"BEAM_ENV_A", "10"}])
+      assert {:ok, s} = Process.start_link(~w(printenv BEAM_ENV_A))
 
-    :timer.sleep(4000)
+      assert {:ok, "10\n"} = Process.read(s)
+      assert {:ok, 0} = Process.await_exit(s)
+    end
 
-    refute os_process_alive?(os_pid)
-  end
+    test "if user env overrides beam env" do
+      :ok = System.put_env([{"BEAM_ENV", "base"}])
 
-  test "exit status" do
-    odu_path =
-      Application.app_dir(:ex_cmd, "priv")
-      |> Path.join(Odu.executable_name())
+      assert {:ok, s} =
+               Process.start_link(~w(printenv BEAM_ENV), env: %{"BEAM_ENV" => "overridden"})
 
-    {:ok, s} = Process.start_link(~w(#{odu_path} -invalid))
-    :eof = Process.read(s)
-    :timer.sleep(500)
-    assert {:done, 2} == Process.status(s)
-  end
-
-  test "if large write blocks other commands" do
-    {:ok, s} = Process.start_link(~w(cat))
-
-    spawn_link(fn -> Process.write(s, @large_bin) end)
-
-    :timer.sleep(20)
-    :ok = Process.close_stdin(s)
-
-    size =
-      Stream.unfold(nil, fn _ ->
-        case Process.read(s) do
-          {:ok, data} ->
-            :timer.sleep(10)
-            {byte_size(data), nil}
-
-          :eof ->
-            nil
-        end
-      end)
-      |> Enum.sum()
-
-    Process.stop(s)
-
-    assert size < byte_size(@large_bin)
-
-    :timer.sleep(100)
-    assert Elixir.Process.alive?(s) == false
-  end
-
-  test "pending writes on stdin close" do
-    {:ok, s} = Process.start_link(~w(cat))
-    task1 = Task.async(fn -> Process.write(s, @large_bin) end)
-    task2 = Task.async(fn -> Process.write(s, "test") end)
-    Process.close_stdin(s)
-
-    assert Task.await(task1) == {:error, :epipe}
-    assert Task.await(task2) == {:error, :epipe}
-    Process.stop(s)
-  end
-
-  test "pending reads when program exits" do
-    {:ok, s} = Process.start_link(~w(cat))
-    task1 = Task.async(fn -> Process.read(s) end)
-    task2 = Task.async(fn -> Process.read(s) end)
-    :timer.sleep(200)
-    Process.close_stdin(s)
-
-    assert Process.read(s) == :eof
-    assert Task.await(task1) == :eof
-    assert Task.await(task2) == :eof
-    Process.stop(s)
-  end
-
-  test "pending write on port close" do
-    {:ok, s} = Process.start_link(~w(cat))
-    task = Task.async(fn -> Process.write(s, @large_bin) end)
-
-    :timer.sleep(200)
-    {:started, %{port: port}} = :sys.get_state(s)
-    Port.close(port)
-
-    assert Task.await(task) == {:error, :epipe}
-    Process.stop(s)
-  end
-
-  test "pending read on port close" do
-    {:ok, s} = Process.start_link(~w(cat))
-    task = Task.async(fn -> Process.read(s) end)
-
-    :timer.sleep(200)
-    {:started, %{port: port}} = :sys.get_state(s)
-    Port.close(port)
-
-    assert Task.await(task) == :eof
-    Process.stop(s)
-  end
-
-  test "invalid write" do
-    Elixir.Process.flag(:trap_exit, true)
-    {:ok, s} = Process.start_link(~w(cat))
-
-    pid = spawn_link(fn -> Process.write(s, :invalid) end)
-    assert_receive {:EXIT, ^pid, reason} when reason != :normal
-
-    assert Elixir.Process.alive?(s) == false
-  end
-
-  test "if closing stdin exits the server" do
-    {:ok, s} = Process.start_link(~w(cat))
-
-    Process.close_stdin(s)
-    :timer.sleep(100)
-    assert Elixir.Process.alive?(s) == true
-  end
-
-  # test "process kill with parallel blocking write" do
-  #   {:ok, s} = Process.start_link(~w(cat))
-
-  #   pid = Task.async(fn -> Process.write(s, @large_bin) end)
-
-  #   :timer.sleep(200)
-  #   os_pid = Process.os_pid(s)
-  #   {"", 0} = System.cmd("kill", ["-SIGKILL", to_string(os_pid)])
-  #   :timer.sleep(1000)
-  #   assert Task.await(pid) == :closed
-  # end
-
-  test "cd" do
-    parent = Path.expand("..", File.cwd!())
-    {:ok, s} = Process.start_link(~w(sh -c pwd), cd: parent)
-    {:ok, dir} = Process.read(s)
-    :eof = Process.read(s)
-    assert String.trim(dir) |> Path.basename() == Path.basename(parent)
-    assert {:ok, 0} = Process.await_exit(s)
-    Process.stop(s)
-  end
-
-  test "env" do
-    assert {:ok, s} = Process.start_link(~w(printenv TEST_ENV), env: %{"TEST_ENV" => "test"})
-
-    assert {:ok, "test\n"} = Process.read(s)
-    assert :eof = Process.read(s)
-    assert {:ok, 0} = Process.await_exit(s)
-    Process.stop(s)
-  end
-
-  test "if external process inherits beam env" do
-    :ok = System.put_env([{"BEAM_ENV_A", "10"}])
-    assert {:ok, s} = Process.start_link(~w(printenv BEAM_ENV_A))
-
-    assert {:ok, "10\n"} = Process.read(s)
-    assert :eof == Process.read(s)
-    assert :ok == Process.close_stdin(s)
-
-    :timer.sleep(100)
-    assert {:done, 0} == Process.status(s)
-
-    assert {:ok, 0} = Process.await_exit(s)
-    Process.stop(s)
-  end
-
-  test "if user env overrides beam env" do
-    :ok = System.put_env([{"BEAM_ENV", "base"}])
-
-    assert {:ok, s} =
-             Process.start_link(~w(printenv BEAM_ENV), env: %{"BEAM_ENV" => "overridden"})
-
-    assert {:ok, "overridden\n"} = Process.read(s)
-    assert :eof = Process.read(s)
-    assert {:ok, 0} = Process.await_exit(s)
-    Process.stop(s)
-  end
-
-  test "multiple await_exit" do
-    {:ok, s} = Process.start_link(~w(cat))
-
-    tasks =
-      for _ <- 1..5 do
-        Task.async(fn ->
-          Process.await_exit(s, :infinity)
-        end)
-      end
-
-    Process.close_stdin(s)
-    :eof = Process.read(s)
-
-    for task <- tasks do
-      assert {:ok, 0} == Task.await(task)
+      assert {:ok, "overridden\n"} = Process.read(s)
+      assert {:ok, 0} = Process.await_exit(s)
     end
   end
 
-  test "await_exit timeout" do
-    {:ok, s} = Process.start_link(~w(cat))
-    assert :timeout = Process.await_exit(s, 100)
-    assert {:started, %{waiting_processes: waiting_processes}} = :sys.get_state(s)
-    assert MapSet.size(waiting_processes) == 0
-    assert :ok = Process.stop(s)
+  def start_parallel_reader(process, logger) do
+    spawn_link(fn ->
+      :ok = Process.change_pipe_owner(process, :stdout, self())
+      reader_loop(process, logger)
+    end)
   end
 
-  def start_parallel_reader(proc_server, logger) do
-    spawn_link(fn -> reader_loop(proc_server, logger) end)
-  end
-
-  def reader_loop(proc_server, logger) do
-    case Process.read(proc_server) do
+  def reader_loop(process, logger) do
+    case Process.read(process) do
       {:ok, data} ->
         add_event(logger, {:read, data})
-        reader_loop(proc_server, logger)
+        reader_loop(process, logger)
 
       :eof ->
         add_event(logger, :eof)
@@ -330,7 +616,7 @@ defmodule ExCmd.ProcessTest do
   end
 
   defp os_process_alive?(pid) do
-    if windows?() do
+    if Application.fetch_env!(:ex_cmd, :current_os) == :windows do
       case System.cmd("tasklist", ["/fi", "pid eq #{pid}"]) do
         {"INFO: No tasks are running which match the specified criteria.\r\n", 0} -> false
         {_, 0} -> true
@@ -340,5 +626,44 @@ defmodule ExCmd.ProcessTest do
     end
   end
 
-  defp windows?, do: :os.type() == {:win32, :nt}
+  defp fixture(script) do
+    Path.join([__DIR__, "../scripts", script])
+  end
+
+  defp generate_binary(size) do
+    Stream.repeatedly(fn -> "A" end)
+    |> Enum.take(size)
+    |> IO.iodata_to_binary()
+  end
+
+  defp block do
+    rand = :rand.uniform()
+
+    receive do
+      ^rand -> :ok
+    end
+  end
+
+  defp snd(pid, term) do
+    send(pid, {self(), term})
+  end
+
+  defp recv(sender) do
+    receive do
+      {^sender, term} -> term
+    after
+      3000 ->
+        raise "recv timeout"
+    end
+  end
+
+  def assert_killed(ret) do
+    if Application.fetch_env!(:ex_cmd, :current_os) == :windows do
+      # Windows does not have a way to distinguish between signals and exit-status
+      # Golang returns exit_status as 1 for kill
+      assert ret in [{:ok, 1}, {:error, :killed}]
+    else
+      assert ret == {:error, :killed}
+    end
+  end
 end

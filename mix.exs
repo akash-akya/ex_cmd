@@ -12,6 +12,7 @@ defmodule ExCmd.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       compilers: Mix.compilers() ++ [:odu],
+      aliases: aliases(),
 
       # Ensure dialyzer sees mix modules
       dialyzer: [plt_add_apps: [:mix]],
@@ -53,10 +54,17 @@ defmodule ExCmd.MixProject do
     ]
   end
 
+  defp aliases do
+    [
+      format: [
+        "format",
+        "cmd --cd go_src/ go fmt"
+      ]
+    ]
+  end
+
   defp deps do
     [
-      {:gen_state_machine, "~> 3.0"},
-
       # development & test
       {:credo, "~> 1.6", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.0", only: [:dev], runtime: false},

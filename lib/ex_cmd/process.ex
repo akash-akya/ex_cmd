@@ -1,118 +1,308 @@
 defmodule ExCmd.Process do
-  @moduledoc """
-  Server to interact with external process
+  @moduledoc ~S"""
+  GenServer which wraps spawned external command.
 
-  `ExCmd.stream!` should be preferred over this. Use this only if you need more control over the life-cycle of IO streams and OS process.
+  Use `ExCmd.stream!/1` over using this. Use this only if you are
+  familiar with life-cycle and need more control of the IO streams
+  and OS process.
+
+  ## Comparison with Port
+
+    * it is demand driven. User explicitly has to `read` the command
+  output, and the progress of the external command is controlled
+  using OS pipes. ExCmd never load more output than we can consume,
+  so we should never experience memory issues
+
+    * it can close stdin while consuming output
+
+    * tries to handle zombie process by attempting to cleanup
+  external process. Note that there is no middleware involved
+  with ex_cmd so it is still possible to endup with zombie process.
+
+    * selectively consume stdout and stderr
+
+  Internally ExCmd uses non-blocking asynchronous system calls
+  to interact with the external process. It does not use port's
+  message based communication, instead uses raw stdio and NIF.
+  Uses asynchronous system calls for IO. Most of the system
+  calls are non-blocking, so it should not block the beam
+  schedulers. Make use of dirty-schedulers for IO
+
+  ## Introduction
+
+  `ExCmd.Process` is a process based wrapper around the external
+  process. It is similar to `port` as an entity but the interface is
+  different. All communication with the external process must happen
+  via `ExCmd.Process` interface.
+
+  ExCmd process life-cycle tied to external process and owners. All
+  system resources such are open file-descriptors, external process
+  are cleaned up when the `ExCmd.Process` dies.
+
+  ### Owner
+
+  Each `ExCmd.Process` has an owner. And it will be the process which
+  created it (via `ExCmd.Process.start_link/2`). Process owner can not
+  be changed.
+
+  Owner process will be linked to the `ExCmd.Process`. So when the
+  ex_cmd process is dies abnormally the owner will be killed too or
+  visa-versa. Owner process should avoid trapping the exit signal, if
+  you want avoid the caller getting killed, create a separate process
+  as owner to run the command and monitor that process.
+
+  Only owner can get the exit status of the command, using
+  `ExCmd.Process.await_exit/2`. All ex_cmd processes **MUST** be
+  awaited.  Exit status or reason is **ALWAYS** sent to the owner. It
+  is similar to [`Task`](https://hexdocs.pm/elixir/Task.html). If the
+  owner exit without `await_exit`, the ex_cmd process will be killed,
+  but if the owner continue without `await_exit` then the ex_cmd
+  process will linger around till the process exit.
+
+  ```
+  iex> alias ExCmd.Process
+  iex> {:ok, p} = Process.start_link(~w(echo hello))
+  iex> Process.read(p, 100)
+  {:ok, "hello\n"}
+  iex> Process.read(p, 100) # read till we get :eof
+  :eof
+  iex> Process.await_exit(p)
+  {:ok, 0}
+  ```
+
+  ### Pipe & Pipe Owner
+
+  Standard IO pipes/channels/streams of the external process such as
+  STDIN, STDOUT, STDERR are called as Pipes. User can either write or
+  read data from pipes.
+
+  Each pipe has an owner process and only that process can write or
+  read from the ex_cmd process. By default the process who created the
+  ex_cmd process is the owner of all the pipes. Pipe owner can be
+  changed using `ExCmd.Process.change_pipe_owner/3`.
+
+  Pipe owner is monitored and the pipes are closed automatically when
+  the pipe owner exit. Pipe Owner can close the pipe early using
+  `ExCmd.Process.close_stdin/1` etc.
+
+  `ExCmd.Process.await_exit/2` closes all of the caller owned pipes by
+  default.
+
+  ```
+  iex> {:ok, p} = Process.start_link(~w(cat))
+  iex> writer = Task.async(fn ->
+  ...>   :ok = Process.change_pipe_owner(p, :stdin, self())
+  ...>   Process.write(p, "Hello World")
+  ...> end)
+  iex> Task.await(writer)
+  :ok
+  iex> Process.read(p, 100)
+  {:ok, "Hello World"}
+  iex> Process.await_exit(p)
+  {:ok, 0}
+  ```
+
+  ### Pipe Operations
+
+  Only Pipe owner can read or write date to the owned pipe.
+  All Pipe operations (read/write) blocks the caller as a mechanism
+  to put back-pressure, and this also makes the API simpler.
+  This is same as how command-line programs works on the shell,
+  along with pipes in-between, Example: `cat larg-file | grep "foo"`.
+  Internally ExCmd uses asynchronous IO APIs to avoid blocking VM
+  (by default NIF calls blocks the VM scheduler),
+  so you can open several pipes and do concurrent IO operations without
+  blocking VM.
+
+
+  ### `stderr`
+
+  by default is `:stderr` is connected to console, data written to
+  stderr will appear on the console.
+
+  You can change the behavior by setting `:stderr`:
+
+    1. `:console`  -  stderr output is redirected to console (Default)
+    2. `:redirect_to_stdout`  -  stderr output is redirected to stdout
+    3. `:disable`  -  stderr output is redirected `/dev/null` suppressing all output. See below for more details.
+
+
+  ### Using `redirect_to_stdout`
+
+  stderr data will be redirected to stdout. When you read stdout
+  you will see both stdout & stderr combined and you won't be
+  able differentiate stdout and stderr separately.
+  This is similar to `:stderr_to_stdout` option present in
+  [Ports](https://www.erlang.org/doc/apps/erts/erlang.html#open_port/2).
+
+  > #### Unexpected Behaviors {: .warning}
+  >
+  > On many systems, `stdout` and `stderr` are separated. And between
+  > the source program to ExCmd, via the kernel, there are several places
+  > that may buffer data, even temporarily, before ExCmd is ready
+  > to read them. There is no enforced ordering of the readiness of
+  > these independent buffers for ExCmd to make use of.
+  >
+  > This can result in unexpected behavior, including:
+  >
+  >  * mangled data, for example, UTF-8 characters may be incomplete
+  > until an additional buffered segment is released on the same
+  > source
+  >  * raw data, where binary data sent on one source, is incompatible
+  > with data sent on the other source.
+  >  * interleaved data, where what appears to be synchronous, is not
+  >
+  > In short, the two streams might be combined at arbitrary byte position
+  > leading to above mentioned issue.
+  >
+  > Most well-behaved command-line programs are unlikely to exhibit
+  > this, but you need to be aware of the risk.
+  >
+  > A good example of this unexpected behavior is streaming JSON from
+  > an external tool to ExCmd, where normal JSON output is expected on
+  > stdout, and errors or warnings via stderr. In the case of an
+  > unexpected error, the stdout stream could be incomplete, or the
+  > stderr message might arrive before the closing data on the stdout
+  > stream.
+
+
+  ### Process Termination
+
+  When owner does (normally or abnormally) the ExCmd process always
+  terminated irrespective of pipe status or process status. External
+  process get a chance to terminate gracefully, if that fail it will
+  be killed.
+
+  If owner calls `await_exit` then the owner owned pipes are closed
+  and we wait for external process to terminate, if the process
+  already terminated then call returns immediately with exit
+  status. Else command will be attempted to stop gracefully following
+  the exit sequence based on the timeout value (5s by default).
+
+  If owner calls `await_exit` with `timeout` as `:infinity` then
+  ExCmd does not attempt to forcefully stop the external command and
+  wait for command to exit on itself. The `await_exit` call can be blocked
+  indefinitely waiting for external process to terminate.
+
+  If external process exit on its own, exit status is collected and
+  ExCmd process will wait for owner to close pipes. Most commands exit
+  with pipes are closed, so just ensuring to close pipes when works is
+  done should be enough.
+
+  Example of process getting terminated by `SIGTERM` signal
+
+  ```
+  # sleep command does not watch for stdin or stdout, so closing the
+  # pipe does not terminate the sleep command.
+  iex> {:ok, p} = Process.start_link(~w(sleep 100000000)) # sleep indefinitely
+  iex> Process.await_exit(p, 2000) # ensure `await_exit` finish within `2000ms`. By default it waits for 5s
+  {:error, :killed} # command exit due to SIGTERM
+  ```
+
+  ## Examples
+
+  Run a command without any input or output
+
+  ```
+  iex> {:ok, p} = Process.start_link(["sh", "-c", "exit 2"])
+  iex> Process.await_exit(p)
+  {:ok, 2}
+  ```
+
+  Single process reading and writing to the command
+
+  ```
+  # bc is a calculator, which reads from stdin and writes output to stdout
+  iex> {:ok, p} = Process.start_link(~w(cat))
+  iex> Process.write(p, "hello\n") # there must be new-line to indicate the end of the input line
+  :ok
+  iex> Process.read(p)
+  {:ok, "hello\n"}
+  iex> Process.write(p, "world\n")
+  :ok
+  iex> Process.read(p)
+  {:ok, "world\n"}
+  # We must close stdin to signal the command that we are done.
+  # since `await_exit` implicitly closes the pipes, in this case we don't have to
+  iex> Process.await_exit(p)
+  {:ok, 0}
+  ```
+
+  Running a command which flush the output on stdin close. This is not
+  supported by Erlang/Elixir ports.
+
+  ```
+  # `base64` command reads all input and writes encoded output when stdin is closed.
+  iex> {:ok, p} = Process.start_link(~w(base64))
+  iex> Process.write(p, "abcdef")
+  :ok
+  iex> Process.close_stdin(p) # we can selectively close stdin and read all output
+  :ok
+  iex> Process.read(p)
+  {:ok, "YWJjZGVm\n"}
+  iex> Process.read(p) # typically it is better to read till we receive :eof when we are not sure how big the output data size is
+  :eof
+  iex> Process.await_exit(p)
+  {:ok, 0}
+  ```
+
+  Read and write to pipes in separate processes
+
+  ```
+  iex> {:ok, p} = Process.start_link(~w(cat))
+  iex> writer = Task.async(fn ->
+  ...>   :ok = Process.change_pipe_owner(p, :stdin, self())
+  ...>   Process.write(p, "Hello World")
+  ...>   # no need to close the pipe explicitly here. Pipe will be closed automatically when process exit
+  ...> end)
+  iex> reader = Task.async(fn ->
+  ...>   :ok = Process.change_pipe_owner(p, :stdout, self())
+  ...>   Process.read(p)
+  ...> end)
+  iex> :timer.sleep(500) # wait for the reader and writer to change pipe owner, otherwise `await_exit` will close the pipes before we change pipe owner
+  iex> Process.await_exit(p, :infinity) # let the reader and writer take indefinite time to finish
+  {:ok, 0}
+  iex> Task.await(writer)
+  :ok
+  iex> Task.await(reader)
+  {:ok, "Hello World"}
+  ```
+
   """
+
+  use GenServer
+
+  alias ExCmd.Process.Exec
+  alias ExCmd.Process.Operations
+  alias ExCmd.Process.Pipe
+  alias ExCmd.Process.Proto
+  alias ExCmd.Process.State
+
+  require Logger
 
   defmodule Error do
     defexception [:message]
   end
 
-  @default [log: false]
+  @type pipe_name :: :stdin | :stdout | :stderr
 
-  alias Mix.Tasks.Compile.Odu
+  @type t :: %__MODULE__{
+          monitor_ref: reference(),
+          exit_ref: reference(),
+          pid: pid | nil,
+          owner: pid
+        }
 
-  @doc """
-  Starts a process using `cmd_with_args` and with options `opts`
+  defstruct [:monitor_ref, :exit_ref, :pid, :owner]
 
-  `cmd_with_args` must be a list containing command with arguments. example: `["cat", "file.txt"]`.
+  @type exit_status :: non_neg_integer
 
-  ### Options
-    * `cd`             -  the directory to run the command in
-    * `env`            -  a list of tuples containing environment key-value. These can be accessed in the external program
-    * `log`            -  When set to `true` odu logs and command stderr output are logged. Defaults to `false`
-  """
-  @spec start_link(nonempty_list(String.t()),
-          cd: String.t(),
-          env: [{String.t(), String.t()}],
-          log: boolean()
-        ) :: {:ok, pid()} | {:error, any()}
-  def start_link([cmd | args], opts \\ []) do
-    opts = Keyword.merge(@default, opts)
-    odu_path = odu_path()
+  @default_opts [env: [], stderr: :console, log: nil]
+  @default_buffer_size 65_531
 
-    if !File.exists?(odu_path) do
-      raise Error, message: "'odu' executable not found"
-    end
-
-    cmd_path = :os.find_executable(to_charlist(cmd))
-
-    if !cmd_path do
-      raise Error, message: "'#{cmd}' executable not found"
-    end
-
-    GenStateMachine.start_link(__MODULE__, %{
-      odu_path: odu_path,
-      cmd_with_args: [to_string(cmd_path) | args],
-      opts: opts
-    })
-  end
-
-  # client
-
-  @doc """
-  Return bytes written by the program to output stream.
-
-  This blocks until the programs write and flush the output
-  """
-  @spec read(pid, non_neg_integer | :infinity) ::
-          {:ok, iodata} | :eof | {:error, String.t()} | :closed
-  def read(server, timeout \\ :infinity) do
-    GenStateMachine.call(server, :read, timeout)
-  end
-
-  @doc """
-  Writes iodata `data` to programs input streams
-
-  This blocks when the pipe is full
-  """
-  @spec write(pid, iodata, non_neg_integer | :infinity) :: :ok | {:error, String.t()} | :closed
-  def write(server, data, timeout \\ :infinity) do
-    GenStateMachine.call(server, {:write, data}, timeout)
-  end
-
-  @doc """
-  Closes input stream. Which signal EOF to the program
-  """
-  @spec close_stdin(pid) :: :ok | {:error, any()}
-  def close_stdin(server), do: GenStateMachine.call(server, :close_stdin)
-
-  @doc """
-  Kills the program
-  """
-  def stop(server), do: GenStateMachine.stop(server, :normal)
-
-  @doc """
-  Returns status of the process. It will be either of `:started`, `{:done, exit_status}`
-  """
-  @spec status(pid) :: :started | {:done, integer()}
-  def status(server), do: GenStateMachine.call(server, :status)
-
-  @doc """
-  Returns os pid of the command
-  """
-  @spec os_pid(pid) :: integer()
-  def os_pid(server), do: GenStateMachine.call(server, :os_pid)
-
-  @doc """
-  Waits for the program to terminate.
-
-  If the program terminates before timeout, it returns `{:ok, exit_status}` else returns `:timeout`
-  """
-  @spec await_exit(pid, timeout()) :: {:ok, integer()} | :timeout
-  def await_exit(server, timeout \\ :infinity) do
-    GenStateMachine.call(server, {:await_exit, timeout})
-  end
-
-  @doc """
-  Returns [port_info](http://erlang.org/doc/man/erlang.html#port_info-1)
-  """
-  def port_info(server), do: GenStateMachine.call(server, :port_info)
-
-  ## server
-  require Logger
-  use GenStateMachine, callback_mode: :handle_event_function
+  # we should ensure we have enough time to get exit_status from the
+  # middleware
+  @exit_status_buffer_timeout 50
 
   @doc false
   defmacro send_input, do: 1
@@ -141,282 +331,593 @@ defmodule ExCmd.Process do
   @doc false
   defmacro start_error, do: 9
 
-  # 4 byte length prefix + 1 byte tag
-  @max_chunk_size 64 * 1024 - 5
+  @doc """
+  Starts `ExCmd.Process` server.
 
-  def init(params) do
-    actions = [{:next_event, :internal, :setup}]
-    {:ok, :init, params, actions}
+  Starts external program using `cmd_with_args` with options `opts`
+
+  `cmd_with_args` must be a list containing command with arguments.
+  example: `["cat", "file.txt"]`.
+
+  ### Options
+
+    * `cd`   -  the directory to run the command in
+
+    * `env`  -  a list of tuples containing environment key-value.
+  These can be accessed in the external program
+
+    * `stderr`  -  different ways to handle stderr stream.
+        1. `:console`  -  stderr output is redirected to console (Default)
+        2. `:redirect_to_stdout`  -  stderr output is redirected to stdout
+        3. `:disable`  -  stderr output is redirected `/dev/null` suppressing all output
+
+      See [`:stderr`](#module-stderr) for more details and issues associated with them
+
+  Caller of the process will be the owner owner of the ExCmd Process.
+  And default owner of all opened pipes.
+
+  Please check module documentation for more details
+  """
+  @spec start_link(nonempty_list(String.t()),
+          cd: String.t(),
+          env: [{String.t(), String.t()}],
+          stderr: :console | :disable | :stream
+        ) :: {:ok, t} | {:error, any()}
+  def start_link([cmd | args], opts \\ []) do
+    opts = Keyword.merge(@default_opts, opts)
+
+    cmd_path = :os.find_executable(to_charlist(cmd))
+    cmd_with_args = [to_string(cmd_path) | args]
+
+    case Exec.normalize_exec_args(cmd_with_args, opts) do
+      {:ok, args} ->
+        owner = self()
+        exit_ref = make_ref()
+        args = Map.merge(args, %{owner: owner, exit_ref: exit_ref})
+        {:ok, pid} = GenServer.start_link(__MODULE__, args)
+        ref = Process.monitor(pid)
+
+        process = %__MODULE__{
+          pid: pid,
+          monitor_ref: ref,
+          exit_ref: exit_ref,
+          owner: owner
+        }
+
+        {:ok, process}
+
+      {:error, _} = error ->
+        error
+    end
   end
 
-  def handle_event(:internal, :setup, :init, params) do
-    Process.flag(:trap_exit, true)
+  @doc """
+  Closes external program's standard input pipe (stdin).
 
-    odu_opts = Keyword.take(params.opts, [:log, :cd])
-    port = start_odu_port(params.odu_path, params.cmd_with_args, odu_opts)
-    send_env(params.opts[:env], port)
+  Only owner of the pipe can close the pipe. This call will return
+  immediately.
+  """
+  @spec close_stdin(t) :: :ok | {:error, :pipe_closed_or_invalid_caller} | {:error, any()}
+  def close_stdin(process) do
+    GenServer.call(process.pid, {:close_pipe, :stdin}, :infinity)
+  end
 
-    os_pid =
-      receive do
-        {^port, {:data, <<os_pid()::unsigned-integer-8, os_pid::big-unsigned-integer-32>>}} ->
-          Logger.debug("Command started. os pid: #{os_pid}")
-          os_pid
+  @doc """
+  Closes external program's standard output pipe (stdout)
 
-        {^port, {:data, <<start_error()::unsigned-integer-8, reason::binary>>}} ->
-          Logger.error("Failed to start odu. reason: #{reason}")
-          raise Error, message: "Failed to start odu"
-      after
-        5_000 ->
-          raise Error, message: "Failed to start command"
+  Only owner of the pipe can close the pipe. This call will return
+  immediately.
+  """
+  @spec close_stdout(t) :: :ok | {:error, any()}
+  def close_stdout(process) do
+    GenServer.call(process.pid, {:close_pipe, :stdout}, :infinity)
+  end
+
+  @doc """
+  Closes external program's standard error pipe (stderr)
+
+  Only owner of the pipe can close the pipe. This call will return
+  immediately.
+  """
+  @spec close_stderr(t) :: :ok | {:error, any()}
+  def close_stderr(process) do
+    GenServer.call(process.pid, {:close_pipe, :stderr}, :infinity)
+  end
+
+  @doc """
+  Writes iodata `data` to external program's standard input pipe.
+
+  This call blocks when the pipe is full. Returns `:ok` when
+  the complete data is written.
+  """
+  @spec write(t, binary) :: :ok | {:error, any()}
+  def write(process, iodata) do
+    binary = IO.iodata_to_binary(iodata)
+    GenServer.call(process.pid, {:write_stdin, binary}, :infinity)
+  end
+
+  @doc """
+  Returns bytes from executed command's stdout with maximum size `max_size`.
+
+  Blocks if no data present in stdout pipe yet. And returns as soon as
+  data of any size is available.
+
+  Note that `max_size` is the maximum size of the returned data. But
+  the returned data can be less than that depending on how the program
+  flush the data etc.
+  """
+  @spec read(t, pos_integer()) :: {:ok, iodata} | :eof | {:error, any()}
+  def read(process, max_size \\ @default_buffer_size)
+      when is_integer(max_size) and max_size > 0 and max_size <= @default_buffer_size do
+    GenServer.call(process.pid, {:read_stdout, max_size}, :infinity)
+  end
+
+  @doc """
+  Changes the Pipe owner of the pipe to specified pid.
+
+  Note that currently any process can change the pipe owner.
+
+  For more details about Pipe Owner, please check module docs.
+  """
+  @spec change_pipe_owner(t, pipe_name, pid) :: :ok | {:error, any()}
+  def change_pipe_owner(process, pipe_name, target_owner_pid) do
+    GenServer.call(
+      process.pid,
+      {:change_pipe_owner, pipe_name, target_owner_pid},
+      :infinity
+    )
+  end
+
+  @doc """
+  Wait for the program to terminate and get exit status.
+
+  **ONLY** the Process owner can call this function. And all ExCmd
+  **process MUST** be awaited (Similar to Task).
+
+  ExCmd first politely asks the program to terminate by closing the
+  pipes owned by the process owner (by default process owner is the
+  pipes owner). Most programs terminates when standard pipes are
+  closed.
+
+  If you have changed the pipe owner to other process, you have to
+  close pipe yourself or wait for the program to exit.
+
+  If the program fails to terminate within the timeout (default 5s)
+  then the program will be killed using the exit sequence by sending
+  `SIGTERM`, `SIGKILL` signals in sequence.
+
+  When timeout is set to `:infinity` `await_exit` wait for the
+  programs to terminate indefinitely.
+
+  For more details check module documentation.
+  """
+  @spec await_exit(t, timeout :: timeout()) ::
+          {:ok, exit_status} | {:error, :killed} | {:error, term}
+  def await_exit(process, timeout \\ 5000) do
+    %__MODULE__{
+      monitor_ref: monitor_ref,
+      exit_ref: exit_ref,
+      owner: owner,
+      pid: pid
+    } = process
+
+    cond do
+      self() != owner ->
+        raise ArgumentError,
+              "task #{inspect(process)} exit status can only be queried by owner but was queried from #{inspect(self())}"
+
+      (timeout != :infinity && !is_integer(timeout)) ||
+          (is_integer(timeout) && timeout < @exit_status_buffer_timeout) ->
+        raise ArgumentError,
+              "timeout must be an integer greater than #{@exit_status_buffer_timeout} or :infinity "
+
+      true ->
+        :ok
+    end
+
+    graceful_exit_timeout =
+      if timeout == :infinity do
+        :infinity
+      else
+        # process exit steps should finish before receive timeout exceeds
+        # receive timeout is max allowed time for the `await_exit` call to block
+        max(@exit_status_buffer_timeout, timeout)
       end
 
-    data = %{
-      pending_write: [],
-      pending_read: [],
-      input_ready: false,
-      waiting_processes: MapSet.new(),
-      port: port,
-      os_pid: os_pid
+    :ok = GenServer.cast(pid, {:prepare_exit, owner, graceful_exit_timeout})
+
+    receive do
+      {^exit_ref, exit_status} ->
+        Process.demonitor(monitor_ref, [:flush])
+        exit_status
+
+      {:DOWN, ^monitor_ref, _, _proc, reason} ->
+        exit({reason, {__MODULE__, :await_exit, [process, timeout]}})
+    after
+      # ideally we should never this this case since the process must
+      # be terminated before the timeout and we should have received
+      # `DOWN` message
+      timeout ->
+        exit({:timeout, {__MODULE__, :await_exit, [process, timeout]}})
+    end
+  end
+
+  @doc """
+  Returns OS pid of the command
+
+  This is meant only for debugging. Avoid interacting with the
+  external process directly
+  """
+  @spec os_pid(t) :: pos_integer()
+  def os_pid(process) do
+    GenServer.call(process.pid, :os_pid, :infinity)
+  end
+
+  ## Server
+
+  @impl true
+  def init(args) do
+    {owner, args} = Map.pop!(args, :owner)
+    {exit_ref, args} = Map.pop!(args, :exit_ref)
+
+    state = %State{
+      args: args,
+      owner: owner,
+      status: :init,
+      operations: Operations.new(),
+      exit_ref: exit_ref,
+      monitor_ref: Process.monitor(owner)
     }
 
-    {:next_state, :started, data, []}
+    {:ok, state, {:continue, nil}}
   end
 
-  def handle_event({:call, from}, {:await_exit, timeout}, state, data) do
-    case state do
-      {:done, exit_status} ->
-        {:keep_state_and_data, [{:reply, from, {:ok, exit_status}}]}
+  @impl true
+  def handle_continue(nil, state) do
+    {:noreply, exec(state)}
+  end
 
-      _ ->
-        actions = [{{:timeout, {:await_exit, from}}, timeout, nil}]
-        data = %{data | waiting_processes: MapSet.put(data.waiting_processes, from)}
-        {:keep_state, data, actions}
+  @impl true
+  def handle_cast({:prepare_exit, caller, timeout}, state) do
+    Logger.debug("prepare_exit: #{timeout}")
+    state = close_pipes(state, caller)
+
+    case maybe_shutdown(state) do
+      {:stop, :normal, state} ->
+        {:stop, :normal, state}
+
+      {:noreply, state} ->
+        if timeout == :infinity do
+          {:noreply, state}
+        else
+          {exit_timeout, kill_timeout} = divide_timeout(timeout)
+          handle_info({:exit_sequence, :normal_exit, exit_timeout, kill_timeout}, state)
+        end
     end
   end
 
-  def handle_event({:call, from}, :status, state, _data) do
-    {:keep_state_and_data, [{:reply, from, state}]}
-  end
-
-  def handle_event({:call, from}, :os_pid, _state, %{os_pid: os_pid}) do
-    {:keep_state_and_data, [{:reply, from, os_pid}]}
-  end
-
-  def handle_event({:call, from}, :port_info, state, data) when state not in [:init, :setup] do
-    {:keep_state_and_data, [{:reply, from, Port.info(data.port)}]}
-  end
-
-  def handle_event(:internal, :input_ready, _state, data) do
-    {data, actions} = try_sending_input(data)
-    {:keep_state, data, actions}
-  end
-
-  def handle_event({:call, from}, {:write, iodata}, :started, data) do
-    bin = IO.iodata_to_binary(iodata)
-    data = %{data | pending_write: data.pending_write ++ [{from, bin}]}
-    {data, actions} = try_sending_input(data)
-    {:keep_state, data, actions}
-  end
-
-  def handle_event({:call, from}, {:write, _iodata}, _state, _) do
-    {:keep_state_and_data, [{:reply, from, {:error, :epipe}}]}
-  end
-
-  def handle_event({:call, from}, :read, state, data) when state in [:started, :input_closed] do
-    {:keep_state, request_output(from, data), []}
-  end
-
-  def handle_event({:call, from}, :read, _state, _) do
-    {:keep_state_and_data, [{:reply, from, :eof}]}
-  end
-
-  def handle_event({:call, from}, :close_stdin, :started, data) do
-    {data, actions} = close_stream(:stdin, from, data)
-    {data, write_actions} = handle_stdin_close(data)
-
-    {:next_state, :input_closed, data, actions ++ write_actions}
-  end
-
-  def handle_event({:call, from}, :close_stdin, _, _data) do
-    {:keep_state_and_data, [{:reply, from, :ok}]}
-  end
-
-  def handle_event(:info, {:EXIT, port, _reason}, state, %{port: port} = data) do
-    {data, write_actions} = handle_stdin_close(data)
-    {data, read_actions} = handle_eof(data)
-    {data, await_exit_actions} = reply_await_exit(data, {:error, :stopped})
-
-    if state in [:started, :input_closed] do
-      {:next_state, :port_closed, data, write_actions ++ read_actions ++ await_exit_actions}
+  @impl true
+  def handle_call({:change_pipe_owner, pipe_name, new_owner}, _from, state) do
+    with {:ok, pipe} <- State.pipe(state, pipe_name),
+         {:ok, new_pipe} <- Pipe.set_owner(pipe, new_owner),
+         {:ok, state} <- State.put_pipe(state, pipe_name, new_pipe) do
+      {:reply, :ok, state}
     else
-      {:keep_state, data, write_actions ++ read_actions ++ await_exit_actions}
+      {:error, _} = error ->
+        {:reply, error, state}
     end
   end
 
-  def handle_event(:info, {:EXIT, _, reason}, _, data) do
-    {:stop_and_reply, reason, [], data}
-  end
-
-  def handle_event(:info, {port, {:exit_status, exit_status}}, _, %{port: port} = data) do
-    Logger.debug("command exited with status: #{exit_status}")
-
-    {data, write_actions} = handle_stdin_close(data)
-    {data, read_actions} = handle_eof(data)
-    {data, await_exit_actions} = reply_await_exit(data, {:ok, exit_status})
-
-    {:next_state, {:done, exit_status}, data, write_actions ++ read_actions ++ await_exit_actions}
-  end
-
-  def handle_event(:info, {port, {:data, output}}, _, %{port: port} = data) do
-    <<tag::unsigned-integer-8, bin::binary>> = output
-    {data, actions} = handle_command(tag, bin, data)
-    {:keep_state, data, actions}
-  end
-
-  def handle_event({:timeout, {:await_exit, from}}, _, _, data) do
-    {:keep_state, %{data | waiting_processes: MapSet.delete(data.waiting_processes, from)},
-     [{:reply, from, :timeout}]}
-  end
-
-  defp start_odu_port(odu_path, cmd_with_args, opts) do
-    args = build_odu_params(opts) ++ ["--" | cmd_with_args]
-    options = [:use_stdio, :exit_status, :binary, :hide, {:packet, 4}, args: args]
-    Port.open({:spawn_executable, odu_path}, options)
-  end
-
-  @odu_protocol_version "1.0"
-  defp build_odu_params(opts) do
-    cd = Path.expand(opts[:cd] || File.cwd!())
-
-    if !File.exists?(cd) || !File.dir?(cd) do
-      raise Error, message: ":cd is not a valid path"
-    end
-
-    params = ["-cd", cd, "-protocol_version", @odu_protocol_version]
-
-    if opts[:log] do
-      params ++ ["-log", "|2"]
+  def handle_call({:close_pipe, pipe_name}, {caller, _} = from, state) do
+    with {:ok, pipe} <- State.pipe(state, pipe_name),
+         {:ok, new_pipe} <- Pipe.close(pipe, caller),
+         :ok <- GenServer.reply(from, :ok),
+         {:ok, new_state} <- State.put_pipe(state, pipe_name, new_pipe) do
+      maybe_shutdown(new_state)
     else
-      params
+      {:error, _} = ret ->
+        {:reply, ret, state}
     end
   end
 
-  defp handle_command(output_eof(), <<>>, data) do
-    handle_eof(data)
+  def handle_call({:read_stdout, size}, from, state) do
+    case Operations.read(state, {:read_stdout, from, size}) do
+      {:noreply, state} ->
+        {:noreply, state}
+
+      ret ->
+        {:reply, ret, state}
+    end
   end
 
-  defp handle_command(output(), bin, %{pending_read: [pid | pending]} = data) do
-    actions = [{:reply, pid, {:ok, bin}}]
+  def handle_call({:write_stdin, binary}, from, state) do
+    case State.pop_operation(state, :write_stdin) do
+      _ when state.status != :running ->
+        {:reply, {:error, :epipe}, state}
 
-    data =
-      if Enum.empty?(pending) do
-        %{data | pending_read: []}
-      else
-        send_command(send_output(), <<>>, data.port)
-        %{data | pending_read: pending}
-      end
+      {:error, :operation_not_found} ->
+        case Operations.pending_input(state, from, binary) do
+          {:noreply, state} ->
+            {:noreply, state}
 
-    {data, actions}
-  end
-
-  defp handle_command(send_input(), <<>>, data) do
-    data = %{data | input_ready: true}
-    actions = [{:next_event, :internal, :input_ready}]
-
-    {data, actions}
-  end
-
-  defp send_env(nil, port), do: send_env([], port)
-
-  defp send_env(env, port) do
-    payload =
-      Enum.map_join(env, fn {key, value} ->
-        entry = String.trim(key) <> "=" <> String.trim(value)
-
-        if byte_size(entry) > 65_536 do
-          raise Error, message: "Env entry length exceeds limit"
+          {:error, term} ->
+            raise inspect(term)
         end
 
-        <<byte_size(entry)::big-unsigned-integer-16, entry::binary>>
-      end)
+      {:ok, {:write_stdin, :demand, nil}, state} ->
+        case Operations.write(state, {:write_stdin, from, binary}) do
+          {:noreply, state} ->
+            {:noreply, state}
 
-    send_command(command_env(), payload, port)
-  end
-
-  defp handle_stdin_close(data) do
-    actions =
-      Enum.flat_map(data.pending_write, fn {pid, _} ->
-        [{:reply, pid, {:error, :epipe}}]
-      end)
-
-    {%{data | pending_write: []}, actions}
-  end
-
-  defp handle_eof(data) do
-    actions =
-      Enum.flat_map(data.pending_read, fn pid ->
-        [{:reply, pid, :eof}]
-      end)
-
-    {%{data | pending_read: []}, actions}
-  end
-
-  defp reply_await_exit(data, response) do
-    actions =
-      Enum.flat_map(data.waiting_processes, fn pid ->
-        [{:reply, pid, response}, {{:timeout, {:await_exit, pid}}, :infinity, nil}]
-      end)
-
-    {%{data | waiting_processes: MapSet.new()}, actions}
-  end
-
-  defp try_sending_input(%{pending_write: [{pid, bin} | pending], input_ready: true} = data) do
-    {chunk, bin} = binary_split_at(bin, @max_chunk_size)
-    send_command(input(), chunk, data.port)
-
-    if bin == <<>> do
-      actions = [{:reply, pid, :ok}]
-      data = %{data | pending_write: pending, input_ready: false}
-      {data, actions}
-    else
-      data = %{data | pending_write: [{pid, bin} | pending], input_ready: false}
-      {data, []}
+          ret ->
+            :ok = GenServer.reply(from, ret)
+            {:noreply, state}
+        end
     end
   end
 
-  defp try_sending_input(data) do
-    {data, []}
+  @impl true
+  def handle_call(:os_pid, _from, state) do
+    {:reply, {:ok, state.os_pid}, state}
   end
 
-  defp request_output(from, %{pending_read: []} = data) do
-    send_command(send_output(), <<>>, data.port)
-    %{data | pending_read: [from]}
+  @impl true
+  def handle_info(
+        {:exit_sequence, current_stage, timeout, kill_timeout},
+        %{status: status} = state
+      ) do
+    Logger.debug("exit_sequence, #{current_stage} #{timeout} #{kill_timeout}, #{inspect(state)}")
+
+    cond do
+      status != :running ->
+        {:noreply, state}
+
+      current_stage == :normal_exit ->
+        Elixir.Process.send_after(self(), {:exit_sequence, :kill, timeout, kill_timeout}, timeout)
+        {:noreply, state}
+
+      current_stage == :kill ->
+        :ok = Proto.kill(state.port)
+
+        Elixir.Process.send_after(
+          self(),
+          {:exit_sequence, :stop, timeout, kill_timeout},
+          kill_timeout
+        )
+
+        {:noreply, state}
+
+      current_stage == :stop ->
+        {:stop, :sigkill_timeout, state}
+    end
   end
 
-  defp request_output(from, data) do
-    %{data | pending_read: data.pending_read ++ [from]}
+  @impl true
+  def handle_info({port, {:data, data}}, %{port: port} = state) do
+    {tag, bin} = Proto.parse_command(data)
+    handle_command(tag, bin, state)
   end
 
-  defp close_stream(:stdin, pid, data) do
-    send_command(close_input(), <<>>, data.port)
-    actions = [{:reply, pid, :ok}]
-    {data, actions}
+  def handle_info({port, {:exit_status, odu_exit_status}}, %{port: port} = state) do
+    Logger.debug("port exit with status #{odu_exit_status} state: #{inspect(state)}")
+
+    state =
+      cond do
+        odu_exit_status != 0 ->
+          state
+          |> cancel_pending_actions()
+          |> set_exit_status({:error, :port_abnormal_exit})
+
+        state.status in [:init, :running] ->
+          state
+          |> cancel_pending_actions()
+          |> set_exit_status({:error, :premature_port_exit})
+
+        true ->
+          state
+      end
+
+    maybe_shutdown(state)
   end
 
-  defp send_command(tag, bin, port) do
-    bin = <<tag::unsigned-integer-8, bin::binary>>
-    Port.command(port, bin)
+  # we are only interested in Port exit signals
+  def handle_info({:EXIT, port, reason}, %State{port: port} = state) when reason != :normal do
+    Logger.debug("port exit with error state: #{inspect(state)}")
+
+    state =
+      state
+      |> cancel_pending_actions()
+      |> set_exit_status({:error, reason})
+
+    maybe_shutdown(state)
   end
 
-  defp binary_split_at(bin, pos) when byte_size(bin) <= pos, do: {bin, <<>>}
-
-  defp binary_split_at(bin, pos) do
-    len = byte_size(bin)
-    {binary_part(bin, 0, pos), binary_part(bin, pos, len - pos)}
+  def handle_info({:EXIT, port, :normal}, %State{port: port} = state) do
+    Logger.debug("port exit normally state: #{inspect(state)}")
+    maybe_shutdown(state)
   end
 
-  defp odu_path do
-    Application.app_dir(:ex_cmd, "priv")
-    |> Path.join(Odu.executable_name())
+  # shutdown unconditionally when process owner exit normally.
+  # Since ExCmd process is linked to the owner, in case of owner crash,
+  # ex_cmd process will be killed by the VM.
+  def handle_info(
+        {:DOWN, owner_ref, :process, _pid, reason},
+        %State{monitor_ref: owner_ref} = state
+      ) do
+    Logger.debug("process owner exit: state: #{inspect(state)}")
+    {:stop, reason, state}
+  end
+
+  def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
+    Logger.debug("pipe owner exit: state: #{inspect(state)}")
+    state = close_pipes(state, pid)
+    maybe_shutdown(state)
+  end
+
+  @spec maybe_shutdown(State.t()) :: {:stop, :normal, State.t()} | {:noreply, State.t()}
+  defp maybe_shutdown(state) do
+    Logger.debug("maybe_shutdown: state: #{inspect(state)}")
+
+    open_pipes_count =
+      state.pipes
+      |> Map.values()
+      |> Enum.count(&Pipe.open?/1)
+
+    if open_pipes_count == 0 && !(state.status in [:init, :running]) do
+      Logger.debug("shutting down state: #{inspect(state)}")
+      {:stop, :normal, state}
+    else
+      {:noreply, state}
+    end
+  end
+
+  @spec exec(State.t()) :: State.t()
+  defp exec(state) do
+    Process.flag(:trap_exit, true)
+
+    %{cmd_with_args: cmd_with_args, env: env} = state.args
+    {os_pid, port} = Proto.start(cmd_with_args, env, Map.take(state.args, [:log, :stderr, :cd]))
+
+    stderr = Pipe.new(:stderr)
+
+    %State{
+      state
+      | port: port,
+        os_pid: os_pid,
+        status: :running,
+        pipes: %{
+          stdin: Pipe.new(:stdin, port, state.owner),
+          stdout: Pipe.new(:stdout, port, state.owner),
+          stderr: stderr
+        }
+    }
+  end
+
+  @type recv_commands :: :output | :output_eof | :send_input | :exit_status
+
+  @spec handle_command(recv_commands, binary, State.t()) :: {:noreply, State.t()}
+  defp handle_command(tag, bin, state) when tag in [:output_eof, :output] do
+    pipe_name = :stdout
+
+    with {:ok, operation_name} <- Operations.match_pending_operation(state, pipe_name),
+         {:ok, {_stream, from, _}, state} <- State.pop_operation(state, operation_name) do
+      ret =
+        case {operation_name, bin} do
+          {name, <<>>} when name in [:read_stdout, :read_stderr] ->
+            :eof
+
+          {name, bin} when name in [:read_stdout, :read_stderr] ->
+            {:ok, bin}
+        end
+
+      :ok = GenServer.reply(from, ret)
+      {:noreply, state}
+    else
+      {:error, _error} ->
+        {:noreply, state}
+    end
+  end
+
+  defp handle_command(:send_input, <<>>, state) do
+    case State.pop_operation(state, :write_stdin) do
+      {:error, :operation_not_found} ->
+        case Operations.demand_input(state) do
+          {:noreply, state} ->
+            {:noreply, state}
+
+          {:error, term} ->
+            raise inspect(term)
+        end
+
+      {:ok, {:write_stdin, from, _bin} = operation, state} when from != :demand ->
+        case Operations.write(state, operation) do
+          {:noreply, state} ->
+            {:noreply, state}
+
+          ret ->
+            :ok = GenServer.reply(from, ret)
+            {:noreply, state}
+        end
+    end
+  end
+
+  defp handle_command(:exit_status, exit_status, state) do
+    state =
+      state
+      |> cancel_pending_actions()
+      |> set_exit_status({:ok, exit_status})
+
+    maybe_shutdown(state)
+  end
+
+  @spec close_pipes(State.t(), pid) :: State.t()
+  defp close_pipes(state, caller) do
+    state =
+      case Pipe.close(state.pipes.stdin, caller) do
+        {:ok, pipe} ->
+          {:ok, state} = State.put_pipe(state, pipe.name, pipe)
+          state
+
+        {:error, _} ->
+          state
+      end
+
+    Enum.reduce(state.pipes, state, fn {_pipe_name, pipe}, state ->
+      case Pipe.close(pipe, caller) do
+        {:ok, pipe} ->
+          {:ok, state} = State.put_pipe(state, pipe.name, pipe)
+          state
+
+        {:error, _} ->
+          state
+      end
+    end)
+  end
+
+  @kill_command_buffer_timeout 100
+
+  @spec divide_timeout(non_neg_integer) :: {non_neg_integer, non_neg_integer}
+  defp divide_timeout(timeout) when timeout > @exit_status_buffer_timeout do
+    timeout = timeout - @exit_status_buffer_timeout
+
+    if timeout < @kill_command_buffer_timeout do
+      {0, 0}
+    else
+      kill_timeout = min(@kill_command_buffer_timeout, timeout - @kill_command_buffer_timeout)
+      {timeout - kill_timeout, kill_timeout}
+    end
+  end
+
+  @spec set_exit_status(State.t(), {:error, term} | {:ok, integer}) :: State.t()
+  defp set_exit_status(state, status) do
+    status =
+      case status do
+        {:error, reason} ->
+          {:error, reason}
+
+        {:ok, -1} ->
+          {:error, :killed}
+
+        # assume unknown status as `killed` for now
+        {:ok, -2} ->
+          {:error, :killed}
+
+        {:ok, exit_status} when is_integer(exit_status) and exit_status >= 0 ->
+          {:ok, exit_status}
+      end
+
+    send(state.owner, {state.exit_ref, status})
+    State.set_status(state, {:exit, status})
+  end
+
+  @spec cancel_pending_actions(State.t()) :: State.t()
+  defp cancel_pending_actions(state) do
+    {state, callers} = Operations.pop_pending_callers(state)
+
+    Enum.each(callers, fn caller ->
+      :ok = GenServer.reply(caller, {:error, :epipe})
+    end)
+
+    state
   end
 end
