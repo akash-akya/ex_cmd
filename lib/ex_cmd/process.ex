@@ -796,7 +796,7 @@ defmodule ExCmd.Process do
   @type recv_commands :: :output | :output_eof | :send_input | :exit_status
 
   @spec handle_command(recv_commands, binary, State.t()) :: {:noreply, State.t()}
-  def handle_command(tag, bin, state) when tag in [:output_eof, :output] do
+  defp handle_command(tag, bin, state) when tag in [:output_eof, :output] do
     pipe_name = :stdout
 
     with {:ok, operation_name} <- Operations.match_pending_operation(state, pipe_name),
@@ -818,7 +818,7 @@ defmodule ExCmd.Process do
     end
   end
 
-  def handle_command(:send_input, <<>>, state) do
+  defp handle_command(:send_input, <<>>, state) do
     case State.pop_operation(state, :write_stdin) do
       {:error, :operation_not_found} ->
         case Operations.demand_input(state) do
@@ -841,7 +841,7 @@ defmodule ExCmd.Process do
     end
   end
 
-  def handle_command(:exit_status, exit_status, state) do
+  defp handle_command(:exit_status, exit_status, state) do
     state =
       state
       |> cancel_pending_actions()
