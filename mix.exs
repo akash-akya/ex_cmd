@@ -1,7 +1,7 @@
 defmodule ExCmd.MixProject do
   use Mix.Project
 
-  @version "0.12.0"
+  @version "0.13.0"
   @scm_url "https://github.com/akash-akya/ex_cmd"
 
   def project do
@@ -42,7 +42,7 @@ defmodule ExCmd.MixProject do
   end
 
   defp description do
-    "Interact with external programs with back-pressure mechanism"
+    "Library for running and communicating with external programs using a back-pressure mechanism"
   end
 
   defp package do
