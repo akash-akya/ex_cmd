@@ -122,9 +122,9 @@ defmodule ExCmd.Process do
 
   You can change the behavior by setting `:stderr`:
 
-    1. `:console`  -  stderr output is redirected to console (Default)
+    1. `:console`  -  stderr output is redirected to console
     2. `:redirect_to_stdout`  -  stderr output is redirected to stdout
-    3. `:disable`  -  stderr output is redirected `/dev/null` suppressing all output. See below for more details.
+    3. `:disable`  -  stderr output is redirected `/dev/null` suppressing all output. See below for more details. (Default)
 
 
   ### Using `redirect_to_stdout`
@@ -347,9 +347,9 @@ defmodule ExCmd.Process do
   These can be accessed in the external program
 
     * `stderr`  -  different ways to handle stderr stream.
-        1. `:console`  -  stderr output is redirected to console (Default)
+        1. `:console`  -  stderr output is redirected to console
         2. `:redirect_to_stdout`  -  stderr output is redirected to stdout
-        3. `:disable`  -  stderr output is redirected `/dev/null` suppressing all output
+        3. `:disable`  -  stderr output is redirected `/dev/null` suppressing all output (Default)
 
       See [`:stderr`](#module-stderr) for more details and issues associated with them
 
@@ -361,7 +361,7 @@ defmodule ExCmd.Process do
   @spec start_link(nonempty_list(String.t()),
           cd: String.t(),
           env: [{String.t(), String.t()}],
-          stderr: :console | :disable | :stream
+          stderr: :console | :redirect_to_stdout | :disable
         ) :: {:ok, t} | {:error, any()}
   def start_link([cmd | args], opts \\ []) do
     opts = Keyword.merge(@default_opts, opts)

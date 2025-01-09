@@ -119,6 +119,14 @@ defmodule ExCmd do
   "X 250 X\n"
   ```
 
+  With stderr set to :disable (default)
+
+  ```
+  iex> ExCmd.stream!(["sh", "-c", "echo foo; echo bar >&2"])
+  ...> |> Enum.to_list()
+  ["foo\n"]
+  ```
+
   With stderr set to :redirect_to_stdout
 
   ```
@@ -127,13 +135,14 @@ defmodule ExCmd do
   "foo\nbar\n"
   ```
 
-  With stderr set to :disable
+  With stderr set to :console
 
   ```
-  iex> ExCmd.stream!(["sh", "-c", "echo foo; echo bar >&2"], stderr: :disable)
-  ...> |> Enum.to_list()
-  ["foo\n"]
+  ExCmd.stream!(["sh", "-c", "echo foo; echo bar >&2"], stderr: :console)
+  |> Enum.to_list()
+  # STDERR output will be written to the console
   ```
+
 
   For more details about stream API, see `ExCmd.stream!/2` and `ExCmd.stream/2`.
 
@@ -234,6 +243,8 @@ defmodule ExCmd do
   @spec stream!(nonempty_list(String.t()),
           input: Enum.t() | collectable_func(),
           exit_timeout: timeout(),
+          cd: String.t(),
+          env: [{String.t(), String.t()}],
           stderr: :console | :redirect_to_stdout | :disable,
           ignore_epipe: boolean(),
           max_chunk_size: pos_integer()
@@ -255,6 +266,8 @@ defmodule ExCmd do
   @spec stream(nonempty_list(String.t()),
           input: Enum.t() | collectable_func(),
           exit_timeout: timeout(),
+          cd: String.t(),
+          env: [{String.t(), String.t()}],
           stderr: :console | :redirect_to_stdout | :disable,
           ignore_epipe: boolean(),
           max_chunk_size: pos_integer()
