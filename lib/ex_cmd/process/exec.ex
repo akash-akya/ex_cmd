@@ -98,7 +98,7 @@ defmodule ExCmd.Process.Exec do
   defp normalize_stderr(stderr) do
     case stderr do
       nil ->
-        {:ok, :console}
+        {:ok, :disable}
 
       stderr when stderr in [:console, :disable, :redirect_to_stdout] ->
         {:ok, stderr}
