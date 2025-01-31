@@ -266,8 +266,12 @@ defmodule ExCmd.Stream do
       is_function(term, 1) ->
         {:ok, {:collectable, term}}
 
+      is_binary(term) ->
+        {:ok, {:enumerable, [term]}}
+
       true ->
-        {:error, "`:input` must be either Enumerable or a function which accepts collectable"}
+        {:error,
+         ":input must be a string, an Enumerable, or a function that accepts a Collectable."}
     end
   end
 
