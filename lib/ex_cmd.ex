@@ -13,6 +13,37 @@ defmodule ExCmd do
   "Hello\n"
   ```
 
+  String input
+  ```
+  iex> ExCmd.stream!(~w(cat), input: "Hello World")
+  iex> |> Enum.into("")
+  "Hello World"
+  ```
+
+  List of strings
+
+  ```
+  iex> ExCmd.stream!(~w(cat), input: ["Hello", " ", "World"])
+  iex> |> Enum.into("")
+  "Hello World"
+  ```
+
+  Binary data
+
+  ```
+  iex> ExCmd.stream!(~w(base64), input: <<1, 2, 3, 4, 5>>)
+  iex> |> Enum.into("")
+  "AQIDBAU=\n"
+  ```
+
+  IOData
+
+  ```
+  iex> ExCmd.stream!(~w(base64), input: [<<1, 2>>, [3], [<<4, 5>>]])
+  iex> |> Enum.into("")
+  "AQIDBAU=\n"
+  ```
+
   Run a command with list of strings as input
 
   ```
@@ -174,6 +205,13 @@ defmodule ExCmd do
   ### Options
 
     * `input` - Input can be either an `Enumerable` or a function which accepts `Collectable`.
+      * String or Binary:
+        ```
+        # List
+        ExCmd.stream!(~w(cat), input: "Hello World") |> Enum.into("")
+        # Stream
+        ExCmd.stream!(~w(cat), input: <<1, 2, 3, 4, 5>>) |> Enum.into("")
+        ```
 
       * Enumerable:
 
@@ -241,7 +279,7 @@ defmodule ExCmd do
   @type collectable_func() :: (Collectable.t() -> any())
 
   @spec stream!(nonempty_list(String.t()),
-          input: Enum.t() | collectable_func(),
+          input: Enum.t() | collectable_func() | String.t() | binary(),
           exit_timeout: timeout(),
           cd: String.t(),
           env: [{String.t(), String.t()}],
@@ -264,7 +302,7 @@ defmodule ExCmd do
   examples.
   """
   @spec stream(nonempty_list(String.t()),
-          input: Enum.t() | collectable_func(),
+          input: Enum.t() | collectable_func() | String.t() | binary(),
           exit_timeout: timeout(),
           cd: String.t(),
           env: [{String.t(), String.t()}],
