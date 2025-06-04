@@ -33,12 +33,13 @@ defmodule Mix.Tasks.Compile.Odu do
 
   defp build_for_current_platform do
     platform = current_platform()
+    middleware_mode = System.get_env("EX_CMD_MIDDLEWARE_MODE")
 
     cond do
-      System.find_executable("go") ->
+      middleware_mode == "compile" && System.find_executable("go") ->
         build_odu(executable_path(platform), [])
 
-      # check if pre-built binary exists for currect platform
+      # check if pre-built binary exists for correct platform
       File.exists?(executable_path(platform)) ->
         :ok
 
