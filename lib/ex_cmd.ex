@@ -296,7 +296,8 @@ defmodule ExCmd do
   element of the stream.
 
   The last element will be of the form `{:exit, term()}`. `term` will be a
-  positive integer in case of normal exit and `:epipe` in case of epipe error
+  two-element tuple with `:status` and a positive integer in case of normal exit
+  (e.g. `{:status, 0}` or `{:status, 2}`), and `:epipe` in case of epipe error.
 
   See `ExCmd.stream!/2` documentation for details about the options and
   examples.
