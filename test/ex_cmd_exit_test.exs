@@ -4,7 +4,8 @@ defmodule ExCmdExitTest do
   # currently running `elixir` command is not working in Windows
   @tag os: :unix
   test "if it kills external command on abnormal vm exit" do
-    ex_cmd_expr = ~S{ExCmd.stream!(["cat"]) |> Stream.run()}
+    ex_cmd_expr =
+      ~S{:ok = Application.put_env(:ex_cmd, :enable_debug_logs, true); ExCmd.stream!(["cat"]) |> Stream.run()}
 
     port =
       Port.open(

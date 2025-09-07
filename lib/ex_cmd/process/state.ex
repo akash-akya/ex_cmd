@@ -74,7 +74,6 @@ defmodule ExCmd.Process.State do
   @spec put_operation(State.t(), Operations.operation()) :: {:ok, t} | {:error, term}
   def put_operation(%State{operations: ops} = state, operation) do
     with {:ok, ops} <- Operations.put(ops, operation) do
-      # dbg(ops)
       {:ok, %State{state | operations: ops}}
     end
   end
