@@ -1,9 +1,8 @@
 defmodule ExCmd.Process.Proto do
   @moduledoc false
 
+  alias ExCmd.Log
   alias Mix.Tasks.Compile.Odu
-
-  require Logger
 
   @doc false
   defmacro send_input, do: 1
@@ -102,7 +101,7 @@ defmodule ExCmd.Process.Proto do
   end
 
   def close(port, stream) when is_port(port) do
-    Logger.debug("Closing stream: #{stream}")
+    Log.debug("Closing stream: #{stream}")
     :ok
   end
 
@@ -117,11 +116,11 @@ defmodule ExCmd.Process.Proto do
     os_pid =
       receive do
         {^port, {:data, <<os_pid()::unsigned-integer-8, os_pid::big-unsigned-integer-32>>}} ->
-          Logger.debug("Command started. os pid: #{os_pid}")
+          Log.debug("Command started. os pid: #{os_pid}")
           os_pid
 
         {^port, {:data, <<start_error()::unsigned-integer-8, reason::binary>>}} ->
-          Logger.error("Failed to start odu. reason: #{reason}")
+          Log.error("Failed to start odu. reason: #{reason}")
           raise ArgumentError, message: "Failed to start odu"
       after
         5_000 ->
