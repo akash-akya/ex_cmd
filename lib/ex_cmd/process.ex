@@ -771,7 +771,7 @@ defmodule ExCmd.Process do
   end
 
   @spec exec(State.t()) :: State.t()
-  defp exec(state) do
+  defp exec(%State{} = state) do
     Process.flag(:trap_exit, true)
 
     %{cmd_with_args: cmd_with_args, env: env} = state.args
