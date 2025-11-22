@@ -2,9 +2,6 @@ name: CI
 on:
   - push
   - pull_request
-env:
-  OTP_VERSION: "24.0"
-  ELIXIR_VERSION: "1.14.0"
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -12,8 +9,8 @@ jobs:
     strategy:
       matrix:
         include:
-          - elixir: 1.16.x
-            otp: 26.x
+          - elixir: 1.19.x
+            otp: 28.x
     steps:
       - uses: erlef/setup-beam@v1
         with:
@@ -53,14 +50,14 @@ jobs:
     strategy:
       matrix:
         include:
-          - elixir: 1.14.x
-            otp: 24.x
-          - elixir: 1.15.x
-            otp: 25.x
           - elixir: 1.16.x
             otp: 26.x
           - elixir: 1.17.x
+            otp: 26.x
+          - elixir: 1.18.x
             otp: 27.x
+          - elixir: 1.19.x
+            otp: 28.x
     steps:
       - uses: erlef/setup-beam@v1
         with:
@@ -99,13 +96,13 @@ jobs:
       - run: nix develop --command mix test --trace
 
   windows:
-    runs-on: windows-latest
+    runs-on: windows-2022
     name: Windows OTP ${{matrix.otp}} / Elixir ${{matrix.elixir}}
     strategy:
       matrix:
         include:
-          - elixir: "1.17"
-            otp: "27"
+          - elixir: "1.19"
+            otp: "28"
     steps:
       - uses: erlef/setup-beam@v1
         with:

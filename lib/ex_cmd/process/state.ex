@@ -87,7 +87,7 @@ defmodule ExCmd.Process.State do
   end
 
   @spec set_status(State.t(), status) :: State.t()
-  def set_status(state, status) do
+  def set_status(%State{} = state, status) do
     %State{state | status: status}
   end
 end
