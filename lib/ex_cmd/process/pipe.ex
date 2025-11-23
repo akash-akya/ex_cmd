@@ -10,7 +10,7 @@ defmodule ExCmd.Process.Pipe do
           port: port | nil,
           monitor_ref: reference() | nil,
           owner: pid | nil,
-          status: :open | :closed
+          status: :open | :closed | :eof
         }
 
   defstruct [:name, :port, :monitor_ref, :owner, status: :init]
@@ -37,14 +37,19 @@ defmodule ExCmd.Process.Pipe do
   end
 
   @spec open?(t) :: boolean()
-  def open?(pipe), do: pipe.status == :open
+  def open?(pipe), do: pipe.status in [:open, :eof]
 
-  @spec read(t, non_neg_integer, pid) :: {:error, :eagain} | {:error, term}
+  @spec read(t, non_neg_integer, pid) :: :eof | {:error, :eagain} | {:error, term}
   def read(pipe, size, caller) do
-    if caller != pipe.owner do
-      {:error, :pipe_closed_or_invalid_caller}
-    else
-      {:error, :eagain} = Proto.read(pipe.port, size)
+    cond do
+      caller != pipe.owner ->
+        {:error, :pipe_closed_or_invalid_caller}
+
+      pipe.status == :eof ->
+        :eof
+
+      true ->
+        {:error, :eagain} = Proto.read(pipe.port, size)
     end
   end
 
@@ -59,20 +64,30 @@ defmodule ExCmd.Process.Pipe do
 
   @spec close(t, pid) :: {:ok, t} | {:error, :pipe_closed_or_invalid_caller}
   def close(%Pipe{} = pipe, caller) do
-    if caller != pipe.owner do
-      {:error, :pipe_closed_or_invalid_caller}
-    else
-      Process.demonitor(pipe.monitor_ref, [:flush])
-      :ok = Proto.close(pipe.port, pipe.name)
-      pipe = %Pipe{pipe | status: :closed, monitor_ref: nil, owner: nil}
+    cond do
+      caller != pipe.owner ->
+        {:error, :pipe_closed_or_invalid_caller}
 
-      {:ok, pipe}
+      pipe.status in [:closed, :eof] ->
+        # Already closed/eof - skip protocol command
+        if pipe.monitor_ref do
+          Process.demonitor(pipe.monitor_ref, [:flush])
+        end
+
+        pipe = %Pipe{pipe | status: :closed, monitor_ref: nil, owner: nil}
+        {:ok, pipe}
+
+      true ->
+        Process.demonitor(pipe.monitor_ref, [:flush])
+        :ok = Proto.close(pipe.port, pipe.name)
+        pipe = %Pipe{pipe | status: :closed, monitor_ref: nil, owner: nil}
+        {:ok, pipe}
     end
   end
 
   @spec set_owner(t, pid) :: {:ok, t} | {:error, :closed}
   def set_owner(%Pipe{} = pipe, new_owner) do
-    if pipe.status == :open do
+    if open?(pipe) do
       ref = Process.monitor(new_owner)
       Process.demonitor(pipe.monitor_ref, [:flush])
       pipe = %Pipe{pipe | owner: new_owner, monitor_ref: ref}
@@ -81,5 +96,17 @@ defmodule ExCmd.Process.Pipe do
     else
       {:error, :closed}
     end
+  end
+
+  @doc """
+  Mark pipe as EOF when remote side closes.
+
+  Only used for stdout/stderr. `:eof` means remote closed,
+  `:closed` means we explicitly closed.
+  """
+  @spec mark_eof(t) :: {:ok, t}
+  def mark_eof(%Pipe{} = pipe) do
+    pipe = %Pipe{pipe | status: :eof}
+    {:ok, pipe}
   end
 end

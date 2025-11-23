@@ -796,6 +796,7 @@ defmodule ExCmd.Process do
 
   @spec handle_command(recv_commands, binary, State.t()) :: {:noreply, State.t()}
   defp handle_command(tag, bin, state) when tag in [:output_eof, :output] do
+    # Only stdout supported for now
     pipe_name = :stdout
 
     with {:ok, operation_name} <- Operations.match_pending_operation(state, pipe_name),
@@ -810,6 +811,18 @@ defmodule ExCmd.Process do
         end
 
       :ok = GenServer.reply(from, ret)
+
+      # Mark pipe as EOF to skip redundant close commands
+      state =
+        if ret == :eof do
+          {:ok, pipe} = State.pipe(state, pipe_name)
+          {:ok, eof_pipe} = Pipe.mark_eof(pipe)
+          {:ok, state} = State.put_pipe(state, pipe_name, eof_pipe)
+          state
+        else
+          state
+        end
+
       {:noreply, state}
     else
       {:error, _error} ->
