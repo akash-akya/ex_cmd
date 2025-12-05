@@ -103,7 +103,8 @@ defmodule ExCmd.Stream do
         :exit_timeout,
         :ignore_epipe,
         :stream_exit_status,
-        process_status: :running
+        process_status: :running,
+        stream_reader_status: :started
       ]
     end
 
@@ -121,6 +122,7 @@ defmodule ExCmd.Stream do
           {[IO.iodata_to_binary(data)], state}
 
         :eof ->
+          state = %State{state | stream_reader_status: :eof}
           state = stop_process(state)
 
           if state.stream_exit_status do
@@ -185,7 +187,7 @@ defmodule ExCmd.Stream do
     defp start_input_streamer(%Sink{process: process} = sink, input) do
       case input do
         :no_input ->
-          Task.async(fn -> :ok end)
+          Task.async(fn -> :no_input end)
 
         {:enumerable, enum} ->
           stream_to_sink(process, fn -> Enum.into(enum, sink) end)
@@ -229,19 +231,49 @@ defmodule ExCmd.Stream do
       process_result = Process.await_exit(state.process, state.exit_timeout)
       writer_task_status = Task.await(state.writer_task)
 
+      if state.stream_reader_status != :eof do
+        handle_early_stream_exit(process_result, writer_task_status)
+      else
+        handle_normal_exit(process_result, writer_task_status)
+      end
+    end
+
+    defp await_exit(%{process_status: status}), do: status
+
+    defp handle_early_stream_exit(process_result, writer_task_status) do
       case {process_result, writer_task_status} do
-        {_process_exit_status, {:error, :epipe}} ->
+        # if we don't have input and stream reader exits early then we don't care about
+        # the exit status, since we are not reading the complete output of the co mmand,
+        # we can't depend on the exit status.
+        {{:ok, _status}, :no_input} ->
           {:error, :epipe}
 
-        {{:ok, status}, :ok} ->
+        # Same as above, the command might be killed due to early stream exit
+        {{:error, :killed}, :no_input} ->
+          {:error, :epipe}
+
+        _rest ->
+          handle_normal_exit(process_result, writer_task_status)
+      end
+    end
+
+    defp handle_normal_exit(process_result, writer_task_status) do
+      case {process_result, writer_task_status} do
+        # if we writer fails with EPIPE then exist status does not matter
+        {{:ok, _status}, {:error, :epipe}} ->
+          {:error, :epipe}
+
+        # we might be getting `:killed` exit status due to EPIPE
+        {{:error, :killed}, {:error, :epipe}} ->
+          {:error, :epipe}
+
+        {{:ok, status}, _writer_status} ->
           {:exit, {:status, status}}
 
         {{:error, reason}, _writer_status} ->
           {:error, reason}
       end
     end
-
-    defp await_exit(%{process_status: status}), do: status
   end
 
   @spec normalize_input(term) ::

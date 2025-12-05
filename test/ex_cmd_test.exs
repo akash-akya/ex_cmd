@@ -37,7 +37,7 @@ defmodule ExCmdTest do
   end
 
   test "stream!/2 early termination with non-zero exit raises" do
-    assert_raise ExCmd.Stream.AbnormalExit, "program exited with exit status: 120", fn ->
+    assert_raise ExCmd.Stream.AbnormalExit, "program exited due to :epipe error", fn ->
       ExCmd.stream!(["sh", "-c", "echo foo; exit 120"])
       |> Enum.take(1)
     end
