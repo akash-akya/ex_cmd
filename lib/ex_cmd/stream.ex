@@ -26,9 +26,9 @@ defmodule ExCmd.Stream do
   defmodule Sink do
     @moduledoc false
 
-    @type t :: %__MODULE__{process: Process.t(), ignore_epipe: boolean}
+    @type t :: %__MODULE__{process: Process.t()}
 
-    defstruct [:process, :ignore_epipe]
+    defstruct [:process]
 
     defimpl Collectable do
       def into(%{process: process}) do
@@ -93,61 +93,62 @@ defmodule ExCmd.Stream do
   end
 
   defimpl Enumerable do
-    # credo:disable-for-next-line Credo.Check.Refactor.CyclomaticComplexity
+    defmodule State do
+      @moduledoc false
+      @enforce_keys [:process, :writer_task]
+      defstruct [
+        :process,
+        :writer_task,
+        :max_chunk_size,
+        :exit_timeout,
+        :ignore_epipe,
+        :stream_exit_status,
+        process_status: :running
+      ]
+    end
+
     def reduce(arg, acc, fun) do
-      start_fun = fn ->
-        state = start_process(arg)
-        {state, :running}
-      end
-
-      next_fun = fn
-        {state, :exited} ->
-          {:halt, {state, :exited}}
-
-        {state, exit_state} ->
-          %{
-            process: process,
-            stream_opts: %{
-              stream_exit_status: stream_exit_status,
-              max_chunk_size: max_chunk_size
-            }
-          } = state
-
-          case Process.read(process, max_chunk_size) do
-            :eof when stream_exit_status == false ->
-              {:halt, {state, :eof}}
-
-            :eof when stream_exit_status == true ->
-              elem = [await_exit(state, :eof)]
-              {elem, {state, :exited}}
-
-            {:ok, x} ->
-              elem = [IO.iodata_to_binary(x)]
-              {elem, {state, exit_state}}
-
-            {:error, errno} ->
-              raise Error, "failed to read from the external process. errno: #{inspect(errno)}"
-          end
-      end
-
-      after_fun = fn
-        {_state, :exited} ->
-          :ok
-
-        {state, exit_state} ->
-          case await_exit(state, exit_state) do
-            {:exit, {:status, 0}} ->
-              :ok
-
-            {:exit, {:status, exit_status}} ->
-              raise AbnormalExit, exit_status
-
-            {:exit, :epipe} ->
-              raise AbnormalExit, :epipe
-          end
-      end
+      start_fun = fn -> start_process(arg) end
+      next_fun = &read_next/1
+      after_fun = &cleanup/1
 
       Stream.resource(start_fun, next_fun, after_fun).(acc, fun)
+    end
+
+    defp read_next(%State{process_status: :running} = state) do
+      case Process.read(state.process, state.max_chunk_size) do
+        {:ok, data} ->
+          {[IO.iodata_to_binary(data)], state}
+
+        :eof ->
+          state = stop_process(state)
+
+          if state.stream_exit_status do
+            {[state.process_status], state}
+          else
+            {:halt, state}
+          end
+
+        {:error, errno} ->
+          raise Error, "failed to read from the external process. errno: #{inspect(errno)}"
+      end
+    end
+
+    defp read_next(%State{} = state), do: {:halt, state}
+
+    defp cleanup(state) do
+      state = stop_process(state)
+      raise_on_abnormal_exit(state)
+    end
+
+    defp raise_on_abnormal_exit(%State{stream_exit_status: true}), do: :ok
+
+    defp raise_on_abnormal_exit(%State{process_status: status}) do
+      case status do
+        {:exit, {:status, 0}} -> :ok
+        {:exit, {:status, code}} -> raise AbnormalExit, code
+        {:error, reason} -> raise AbnormalExit, reason
+      end
     end
 
     def count(_stream) do
@@ -162,95 +163,85 @@ defmodule ExCmd.Stream do
       {:error, __MODULE__}
     end
 
-    defp start_process(%ExCmd.Stream{
-           process_opts: process_opts,
-           stream_opts: stream_opts,
-           cmd_with_args: cmd_with_args
-         }) do
-      process_opts = Keyword.put(process_opts, :stderr, stream_opts[:stderr])
-      {:ok, process} = Process.start_link(cmd_with_args, process_opts)
-      sink = %Sink{process: process, ignore_epipe: stream_opts[:ignore_epipe]}
-      writer_task = start_input_streamer(sink, stream_opts.input)
+    defp start_process(%ExCmd.Stream{} = stream) do
+      opts = stream.stream_opts
 
-      %{process: process, stream_opts: stream_opts, writer_task: writer_task}
+      process_opts = Keyword.put(stream.process_opts, :stderr, opts.stderr)
+      {:ok, process} = Process.start_link(stream.cmd_with_args, process_opts)
+
+      sink = %Sink{process: process}
+      writer_task = start_input_streamer(sink, opts.input)
+
+      %State{
+        process: process,
+        writer_task: writer_task,
+        max_chunk_size: opts.max_chunk_size,
+        exit_timeout: opts.exit_timeout,
+        ignore_epipe: opts.ignore_epipe,
+        stream_exit_status: opts.stream_exit_status
+      }
     end
 
-    @doc false
-    @spec start_input_streamer(term, term) :: Task.t()
     defp start_input_streamer(%Sink{process: process} = sink, input) do
       case input do
         :no_input ->
-          # use `Task.completed(:ok)` when bumping min Elixir requirement
           Task.async(fn -> :ok end)
 
         {:enumerable, enum} ->
-          Task.async(fn ->
-            Process.change_pipe_owner(process, :stdin, self())
-
-            try do
-              Enum.into(enum, sink)
-            rescue
-              Error ->
-                {:error, :epipe}
-            end
-          end)
+          stream_to_sink(process, fn -> Enum.into(enum, sink) end)
 
         {:collectable, func} ->
-          Task.async(fn ->
-            Process.change_pipe_owner(process, :stdin, self())
+          stream_to_sink(process, fn -> func.(sink) end)
+      end
+    end
 
-            try do
-              func.(sink)
-            rescue
-              Error ->
-                {:error, :epipe}
+    defp stream_to_sink(process, write_fn) do
+      Task.async(fn ->
+        Process.change_pipe_owner(process, :stdin, self())
+
+        try do
+          write_fn.()
+        rescue
+          Error -> {:error, :epipe}
+        end
+      end)
+    end
+
+    defp stop_process(state) do
+      status =
+        case await_exit(state) do
+          {:exit, term} ->
+            {:exit, term}
+
+          {:error, reason} ->
+            if state.ignore_epipe do
+              {:exit, {:status, 0}}
+            else
+              {:error, reason}
             end
-          end)
+        end
+
+      %{state | process_status: status}
+    end
+
+    @spec await_exit(map) :: {:exit, {:status, non_neg_integer}} | {:error, atom}
+    defp await_exit(%{process_status: :running} = state) do
+      process_result = Process.await_exit(state.process, state.exit_timeout)
+      writer_task_status = Task.await(state.writer_task)
+
+      case {process_result, writer_task_status} do
+        {_process_exit_status, {:error, :epipe}} ->
+          {:error, :epipe}
+
+        {{:ok, status}, :ok} ->
+          {:exit, {:status, status}}
+
+        {{:error, reason}, _writer_status} ->
+          {:error, reason}
       end
     end
 
-    defp await_exit(state, exit_state) do
-      %{
-        process: process,
-        stream_opts: %{ignore_epipe: ignore_epipe, exit_timeout: exit_timeout},
-        writer_task: writer_task
-      } = state
-
-      result = Process.await_exit(process, exit_timeout)
-      writer_task_status = Task.await(writer_task)
-
-      case {exit_state, result, writer_task_status} do
-        # if reader exit early and there is a pending write
-        {:running, {:ok, _status}, {:error, :epipe}} when ignore_epipe ->
-          {:exit, {:status, 0}}
-
-        # :killed might be due to SIGPIPE / EPIPE
-        {:running, {:error, :killed}, {:error, :epipe}} when ignore_epipe ->
-          {:exit, {:status, 0}}
-
-        # if reader exit early and there is no pending write or if
-        # there is no writer
-        {:running, {:ok, _status}, :ok} when ignore_epipe ->
-          {:exit, {:status, 0}}
-
-        {:running, {:error, :killed}, :ok} when ignore_epipe ->
-          {:exit, {:status, 0}}
-
-        # if we get epipe from writer then raise that error, and ignore exit status
-        {:running, {:ok, _status}, {:error, :epipe}} when ignore_epipe == false ->
-          {:exit, :epipe}
-
-        {:running, {:error, :killed}, {:error, :epipe}} when ignore_epipe == false ->
-          {:exit, :epipe}
-
-        # Normal exit success case
-        {_, {:ok, 0}, _} ->
-          {:exit, {:status, 0}}
-
-        {:eof, {:ok, exit_status}, _} ->
-          {:exit, {:status, exit_status}}
-      end
-    end
+    defp await_exit(%{process_status: status}), do: status
   end
 
   @spec normalize_input(term) ::
