@@ -101,7 +101,7 @@ defmodule ExCmd.Process.Proto do
   end
 
   def close(port, stream) when is_port(port) do
-    Log.debug("Closing stream: #{stream}")
+    Log.debug(fn -> "Closing stream: #{stream}" end)
     :ok
   end
 
@@ -116,7 +116,7 @@ defmodule ExCmd.Process.Proto do
     os_pid =
       receive do
         {^port, {:data, <<os_pid()::unsigned-integer-8, os_pid::big-unsigned-integer-32>>}} ->
-          Log.debug("Command started. os pid: #{os_pid}")
+          Log.debug(fn -> "Command started. os pid: #{os_pid}" end)
           os_pid
 
         {^port, {:data, <<start_error()::unsigned-integer-8, reason::binary>>}} ->

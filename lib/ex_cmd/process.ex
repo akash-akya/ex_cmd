@@ -578,7 +578,7 @@ defmodule ExCmd.Process do
 
   @impl true
   def handle_cast({:prepare_exit, caller, timeout}, state) do
-    Log.debug("prepare_exit: #{timeout}")
+    Log.debug(fn -> "prepare_exit: #{timeout}" end)
     state = close_pipes(state, caller)
 
     case maybe_shutdown(state) do
@@ -665,7 +665,9 @@ defmodule ExCmd.Process do
         {:exit_sequence, current_stage, timeout, kill_timeout},
         %{status: status} = state
       ) do
-    Log.debug("exit_sequence, #{current_stage} #{timeout} #{kill_timeout}, #{inspect(state)}")
+    Log.debug(fn ->
+      "exit_sequence, #{current_stage} #{timeout} #{kill_timeout}, #{inspect(state)}"
+    end)
 
     cond do
       status != :running ->
@@ -698,7 +700,7 @@ defmodule ExCmd.Process do
   end
 
   def handle_info({port, {:exit_status, odu_exit_status}}, %{port: port} = state) do
-    Log.debug("port exit with status #{odu_exit_status} state: #{inspect(state)}")
+    Log.debug(fn -> "port exit with status #{odu_exit_status} state: #{inspect(state)}" end)
 
     state =
       cond do
@@ -721,7 +723,7 @@ defmodule ExCmd.Process do
 
   # we are only interested in Port exit signals
   def handle_info({:EXIT, port, reason}, %State{port: port} = state) when reason != :normal do
-    Log.debug("port exit with error state: #{inspect(state)}")
+    Log.debug(fn -> "port exit with error state: #{inspect(state)}" end)
 
     state =
       state
@@ -732,7 +734,7 @@ defmodule ExCmd.Process do
   end
 
   def handle_info({:EXIT, port, :normal}, %State{port: port} = state) do
-    Log.debug("port exit normally state: #{inspect(state)}")
+    Log.debug(fn -> "port exit normally state: #{inspect(state)}" end)
     maybe_shutdown(state)
   end
 
@@ -743,19 +745,19 @@ defmodule ExCmd.Process do
         {:DOWN, owner_ref, :process, _pid, reason},
         %State{monitor_ref: owner_ref} = state
       ) do
-    Log.debug("process owner exit: state: #{inspect(state)}")
+    Log.debug(fn -> "process owner exit: state: #{inspect(state)}" end)
     {:stop, reason, state}
   end
 
   def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
-    Log.debug("pipe owner exit: state: #{inspect(state)}")
+    Log.debug(fn -> "pipe owner exit: state: #{inspect(state)}" end)
     state = close_pipes(state, pid)
     maybe_shutdown(state)
   end
 
   @spec maybe_shutdown(State.t()) :: {:stop, :normal, State.t()} | {:noreply, State.t()}
   defp maybe_shutdown(state) do
-    Log.debug("maybe_shutdown: state: #{inspect(state)}")
+    Log.debug(fn -> "maybe_shutdown: state: #{inspect(state)}" end)
 
     open_pipes_count =
       state.pipes
@@ -763,7 +765,7 @@ defmodule ExCmd.Process do
       |> Enum.count(&Pipe.open?/1)
 
     if open_pipes_count == 0 && !(state.status in [:init, :running]) do
-      Log.debug("shutting down state: #{inspect(state)}")
+      Log.debug(fn -> "shutting down state: #{inspect(state)}" end)
       {:stop, :normal, state}
     else
       {:noreply, state}
