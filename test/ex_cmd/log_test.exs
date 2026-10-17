@@ -93,12 +93,12 @@ defmodule ExCmd.LogTest do
 
       assert is_integer(os_pid) and os_pid > 0
 
-      session = :trace.session_create(__MODULE__, self(), [])
-
+      # This serial case traces only its own command. The suite has no other
+      # trace patterns; remove both patterns after the command has settled.
       try do
-        assert 1 = :trace.function(session, {Kernel, :inspect, 2}, true, [:local])
-        assert 1 = :trace.function(session, {Command, :handle_info, 2}, true, [:local])
-        assert 1 = :trace.process(session, command_pid, true, [:call, :arity])
+        assert 1 = :erlang.trace_pattern({Kernel, :inspect, 2}, true, [:local])
+        assert 1 = :erlang.trace_pattern({Command, :handle_info, 2}, true, [:local])
+        assert 1 = :erlang.trace(command_pid, true, [:call, :arity, {:tracer, self()}])
 
         payload = "lazy-debug-roundtrip"
         assert :ok = Command.write(command, payload)
@@ -110,13 +110,14 @@ defmodule ExCmd.LogTest do
 
         # The command has stopped, and this barrier delivers all its traces
         # before either test checks for the absence/presence of inspection.
-        delivered = :trace.delivered(session, :all)
+        delivered = :erlang.trace_delivered(:all)
         assert_receive {:trace_delivered, :all, ^delivered}, 5_000
         assert_received {:trace, ^command_pid, :call, {Command, :handle_info, 2}}
 
         command_pid
       after
-        :trace.session_destroy(session)
+        :erlang.trace_pattern({Kernel, :inspect, 2}, false, [:local])
+        :erlang.trace_pattern({Command, :handle_info, 2}, false, [:local])
       end
     after
       if Process.alive?(command_pid), do: Command.await_exit(command, 5_000)
