@@ -554,7 +554,7 @@ defmodule ExCmd.ProcessTest do
     end
 
     test "when user pass invalid option" do
-      assert {:error, "invalid opts: [invalid: :test]"} =
+      assert {:error, "invalid opts: [:invalid]"} =
                Process.start_link(~w(cat), invalid: :test)
     end
 

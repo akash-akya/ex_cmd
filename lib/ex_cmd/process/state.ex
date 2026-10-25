@@ -36,6 +36,7 @@ defmodule ExCmd.Process.State do
           monitor_ref: reference()
         }
 
+  @derive {Inspect, only: [:os_pid, :stderr]}
   defstruct [
     :args,
     :owner,

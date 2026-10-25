@@ -52,9 +52,9 @@ func main() {
 	if exitError, ok := err.(*exec.Error); ok {
 		// This shouldn't really happen in practice because we check for
 		// program existence in Elixir, before launching odu
-		logger.Printf("Command exited with error: %v", exitError)
+		logger.Printf("Command launch failed (%T)", exitError)
 	} else {
-		logger.Printf("Command exited with unknown errors", err)
+		logger.Printf("Command exited with unknown error (%T)", err)
 	}
 
 	os.Exit(3)
@@ -69,7 +69,7 @@ func validateArgs(args []string) {
 		dieUsage(fmt.Sprintf("Invalid version specified: %v  Supported version: %v", *protocolVersionFlag, ProtocolVersion))
 	}
 
-	logger.Printf("dir:%v, log:%v, protocol_version:%v, stderr: %v, args:%v\n", *cdFlag, *logFlag, *protocolVersionFlag, *stderrFlag, args)
+	logger.Printf("Command arguments: %d (values redacted)\n", len(args))
 }
 
 func notFifo(path string) bool {

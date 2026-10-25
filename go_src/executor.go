@@ -299,7 +299,7 @@ func readEnvFromStdin() []string {
 		i += length
 	}
 
-	logger.Printf("Command Env: %v\n", env)
+	logger.Printf("Command environment entries: %d (values redacted)\n", len(env))
 
 	return env
 }

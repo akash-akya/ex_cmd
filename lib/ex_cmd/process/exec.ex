@@ -38,7 +38,7 @@ defmodule ExCmd.Process.Exec do
         if path do
           {:ok, to_charlist(path)}
         else
-          {:error, "command not found: #{inspect(cmd)}"}
+          {:error, "command not found"}
         end
 
       _ ->
@@ -50,7 +50,7 @@ defmodule ExCmd.Process.Exec do
     if Enum.all?(args, &is_binary/1) do
       {:ok, Enum.map(args, &to_charlist/1)}
     else
-      {:error, "command arguments must be list of strings. #{inspect(args)}"}
+      {:error, "command arguments must be list of strings"}
     end
   end
 
@@ -136,7 +136,7 @@ defmodule ExCmd.Process.Exec do
     if Enum.empty?(additional_opts) do
       :ok
     else
-      {:error, "invalid opts: #{inspect(additional_opts)}"}
+      {:error, "invalid opts: #{inspect(Keyword.keys(additional_opts))}"}
     end
   end
 end

@@ -2,13 +2,14 @@ package main
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
 )
 
 func startCommandPipeline(proc *exec.Cmd, input <-chan []byte, inputDemand chan<- Packet, outputDemand <-chan Packet, stderrConfig string) chan []byte {
-	logger.Printf("Command: %v\n", proc.String())
+	logger.Printf("Command arguments: %d (values redacted)\n", len(proc.Args))
 
 	cmdInput, err := proc.StdinPipe()
 	fatalIf(err)
@@ -26,7 +27,9 @@ func startCommandPipeline(proc *exec.Cmd, input <-chan []byte, inputDemand chan<
 	}
 
 	execErr := proc.Start()
-	fatalIf(execErr)
+	if execErr != nil {
+		fatal(fmt.Sprintf("command launch failed (%T)", execErr))
+	}
 
 	go writeToCommandStdin(cmdInput, input, inputDemand)
 
