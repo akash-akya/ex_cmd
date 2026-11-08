@@ -6,8 +6,6 @@ defmodule ExCmd.Stream do
   alias ExCmd.Process
   alias ExCmd.Process.Error
 
-  require Logger
-
   defmodule AbnormalExit do
     defexception [:message, :exit_status]
 

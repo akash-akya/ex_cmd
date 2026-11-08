@@ -272,7 +272,7 @@ defmodule ExCmd.Process do
 
   use GenServer
 
-  alias ExCmd.Log
+  require ExCmd.Log, as: Log
   alias ExCmd.Process.Exec
   alias ExCmd.Process.Operations
   alias ExCmd.Process.Pipe

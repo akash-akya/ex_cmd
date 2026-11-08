@@ -1,7 +1,7 @@
 defmodule ExCmd.Process.Proto do
   @moduledoc false
 
-  alias ExCmd.Log
+  require ExCmd.Log, as: Log
   alias Mix.Tasks.Compile.Odu
 
   @doc false
